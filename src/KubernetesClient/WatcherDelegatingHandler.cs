@@ -48,18 +48,7 @@ namespace k8s
             protected override async Task SerializeToStreamAsync(Stream stream, TransportContext context)
             {
                 _originStream = await _originContent.ReadAsStreamAsync();
-
                 StreamReader = new PeekableStreamReader(_originStream);
-
-                var firstLine = await StreamReader.PeekLineAsync();
-
-                var writer = new StreamWriter(stream);
-
-//                using (writer) // leave open
-                {
-                    await writer.WriteAsync(firstLine);
-                    await writer.FlushAsync();
-                }
             }
 
             protected override bool TryComputeLength(out long length)
