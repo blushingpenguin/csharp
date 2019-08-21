@@ -45,9 +45,7 @@ namespace k8s
 
             var query = string.Empty;
 
-            // Don't sent watch, because setting that value will cause the WatcherDelegatingHandler to kick in. That class
-            // "eats" the first line, which is something we don't want.
-            // query = QueryHelpers.AddQueryString(query, "watch", "true");
+            query = QueryHelpers.AddQueryString(query, "watch", "true");
 
             if (@continue != null)
             {
@@ -93,6 +91,10 @@ namespace k8s
 
             // Create HTTP transport objects
             var httpRequest = new HttpRequestMessage(HttpMethod.Get, uriBuilder.ToString());
+
+            // Setting the "watch" query string parameter causes the WatcherDelegatingHandler
+            // to kick in - seT the x-watch-sugar handler as well to hack around that behaviour.
+            httpRequest.Headers.Add("x-watch-sugar", "true");
 
             // Set Credentials
             if (this.Credentials != null)

@@ -19,9 +19,14 @@ namespace k8s
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request,
             CancellationToken cancellationToken)
         {
+            bool isWatchSugar = request.Headers.Contains("x-watch-sugar");
+            if (isWatchSugar)
+            {
+                request.Headers.Remove("x-watch-sugar");
+            }
             var originResponse = await base.SendAsync(request, cancellationToken);
 
-            if (originResponse.IsSuccessStatusCode)
+            if (originResponse.IsSuccessStatusCode && !isWatchSugar)
             {
                 var query = QueryHelpers.ParseQuery(request.RequestUri.Query);
 

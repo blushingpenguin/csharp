@@ -58,22 +58,26 @@ namespace KubernetesWatchGenerator
             // That's usually because there are different version of the same object (e.g. for deployments).
             var blacklistedOperations = new HashSet<string>()
             {
-                "watchAppsV1beta1NamespacedDeployment",
-                "watchAppsV1beta2NamespacedDeployment",
-                "watchExtensionsV1beta1NamespacedDeployment",
-                "watchExtensionsV1beta1NamespacedNetworkPolicy",
-                "watchPolicyV1beta1PodSecurityPolicy",
-                "watchExtensionsV1beta1PodSecurityPolicy",
-                "watchExtensionsV1beta1NamespacedIngress",
-                "watchNamespacedIngress",
-                "watchExtensionsV1beta1NamespacedIngressList",
-                "watchNetworkingV1beta1NamespacedIngress",
-                "watchNetworkingV1beta1NamespacedIngressList",
+                "listAppsV1beta1DeploymentForAllNamespaces",
+                "listAppsV1beta1NamespacedDeployment",
+                "listAppsV1beta2NamespacedDeployment",
+                "listExtensionsV1beta1NamespacedDeployment",
+                "listExtensionsV1beta1NamespacedNetworkPolicy",
+                "listPolicyV1beta1PodSecurityPolicy",
+                "listExtensionsV1beta1PodSecurityPolicy",
+                "listExtensionsV1beta1NamespacedIngress",
+                "listNamespacedIngress",
+                "listExtensionsV1beta1NamespacedIngressList",
+                "listNetworkingV1beta1NamespacedIngress",
+                "listNetworkingV1beta1NamespacedIngressList",
+                "listNetworkingV1beta1IngressForAllNamespaces"
             };
 
             var watchOperations = swagger.Operations.Where(
-                o => o.Path.Contains("/watch/")
-                && o.Operation.ActualParameters.Any(p => p.Name == "name")
+                o => !o.Path.Contains("/watch/")
+                && !o.Path.StartsWith("/apis/extensions/v1beta1/")
+                && o.Method == SwaggerOperationMethod.Get
+                && o.Operation.ActualParameters.Any(p => p.Name == "watch")
                 && !blacklistedOperations.Contains(o.Operation.OperationId)).ToArray();
 
             // Render.
@@ -248,7 +252,7 @@ namespace KubernetesWatchGenerator
             // This tries to remove the version from the method name, e.g. watchCoreV1NamespacedPod => WatchNamespacedPod
             methodName = methodName.Replace(tag, string.Empty, StringComparison.OrdinalIgnoreCase);
             methodName += "Async";
-            return methodName;
+            return methodName.Replace("List", "Watch");
         }
 
         static void GetDotNetType(RenderContext context, IList<object> arguments, IDictionary<string, object> options, RenderBlock fn, RenderBlock inverse)
