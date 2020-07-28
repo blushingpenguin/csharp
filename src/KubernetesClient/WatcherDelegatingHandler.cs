@@ -9,6 +9,11 @@ using System.Threading.Tasks;
 
 namespace k8s
 {
+    public interface ILineSeparatedHttpContent
+    {
+        TextReader StreamReader { get; }
+    }
+
     /// <summary>
     /// This HttpDelegatingHandler is to rewrite the response and return first line to autorest client
     /// then use WatchExt to create a watch object which interact with the replaced http response to get watch works.
@@ -141,7 +146,7 @@ namespace k8s
             }
         }
 
-        internal class LineSeparatedHttpContent : HttpContent
+        internal class LineSeparatedHttpContent : HttpContent, ILineSeparatedHttpContent
         {
             private readonly HttpContent _originContent;
             private readonly CancellationToken _cancellationToken;
@@ -153,15 +158,16 @@ namespace k8s
                 _cancellationToken = cancellationToken;
             }
 
-            internal PeekableStreamReader StreamReader { get; private set; }
+            public TextReader StreamReader { get; private set; }
 
             protected override async Task SerializeToStreamAsync(Stream stream, TransportContext context)
             {
                 _originStream = await _originContent.ReadAsStreamAsync().ConfigureAwait(false);
 
-                StreamReader = new PeekableStreamReader(new CancelableStream(_originStream, _cancellationToken));
+                var streamReader = new PeekableStreamReader(new CancelableStream(_originStream, _cancellationToken));
+                StreamReader = streamReader;
 
-                var firstLine = await StreamReader.PeekLineAsync().ConfigureAwait(false);
+                var firstLine = await streamReader.PeekLineAsync().ConfigureAwait(false);
 
                 var writer = new StreamWriter(stream);
 
