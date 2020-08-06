@@ -54,10 +54,7 @@ namespace k8s
 
             public override async Task FlushAsync(CancellationToken cancellationToken)
             {
-                using (var cancellationTokenSource = CreateCancellationTokenSource(cancellationToken))
-                {
-                    await _innerStream.FlushAsync(cancellationTokenSource.Token).ConfigureAwait(false);
-                }
+                await _innerStream.FlushAsync(_cancellationToken).ConfigureAwait(false);
             }
 
             public override int Read(byte[] buffer, int offset, int count) =>
@@ -66,11 +63,8 @@ namespace k8s
             public override async Task<int> ReadAsync(byte[] buffer, int offset, int count,
                 CancellationToken cancellationToken)
             {
-                using (var cancellationTokenSource = CreateCancellationTokenSource(cancellationToken))
-                {
-                    return await _innerStream.ReadAsync(buffer, offset, count, cancellationTokenSource.Token)
-                        .ConfigureAwait(false);
-                }
+                return await _innerStream.ReadAsync(buffer, offset, count, _cancellationToken)
+                    .ConfigureAwait(false);
             }
 
             public override long Seek(long offset, SeekOrigin origin) => _innerStream.Seek(offset, origin);
@@ -83,11 +77,8 @@ namespace k8s
             public override async Task WriteAsync(byte[] buffer, int offset, int count,
                 CancellationToken cancellationToken)
             {
-                using (var cancellationTokenSource = CreateCancellationTokenSource(cancellationToken))
-                {
-                    await _innerStream.WriteAsync(buffer, offset, count, cancellationTokenSource.Token)
-                        .ConfigureAwait(false);
-                }
+                await _innerStream.WriteAsync(buffer, offset, count, _cancellationToken)
+                    .ConfigureAwait(false);
             }
 
             public override bool CanRead => _innerStream.CanRead;
@@ -112,37 +103,6 @@ namespace k8s
                 }
 
                 base.Dispose(disposing);
-            }
-
-            private LinkedCancellationTokenSource CreateCancellationTokenSource(CancellationToken userCancellationToken)
-            {
-                return new LinkedCancellationTokenSource(_cancellationToken, userCancellationToken);
-            }
-
-            private readonly struct LinkedCancellationTokenSource : IDisposable
-            {
-                private readonly CancellationTokenSource _cancellationTokenSource;
-
-                public LinkedCancellationTokenSource(CancellationToken token1, CancellationToken token2)
-                {
-                    if (token1.CanBeCanceled && token2.CanBeCanceled)
-                    {
-                        _cancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(token1, token2);
-                        Token = _cancellationTokenSource.Token;
-                    }
-                    else
-                    {
-                        _cancellationTokenSource = null;
-                        Token = token1.CanBeCanceled ? token1 : token2;
-                    }
-                }
-
-                public CancellationToken Token { get; }
-
-                public void Dispose()
-                {
-                    _cancellationTokenSource?.Dispose();
-                }
             }
         }
 
