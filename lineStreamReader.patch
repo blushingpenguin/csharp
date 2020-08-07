@@ -1,0 +1,967 @@
+diff --git a/src/KubernetesClient/IAsyncLineReader.cs b/src/KubernetesClient/IAsyncLineReader.cs
+new file mode 100644
+index 0000000..4d0a9ea
+--- /dev/null
++++ b/src/KubernetesClient/IAsyncLineReader.cs
+@@ -0,0 +1,18 @@
++using System;
++using System.Threading;
++using System.Threading.Tasks;
++
++namespace k8s
++{
++    /// <summary>
++    /// Represents a line oriented stream used for watching server responses
++    /// </summary>
++    public interface IAsyncLineReader : IDisposable
++    {
++        /// <summary>
++        /// Read a line from the server
++        /// </summary>
++        /// <param name="cancellationToken">A token that can be used to cancel the read</param>
++        Task<string> ReadLineAsync(CancellationToken cancellationToken);
++    }
++}
+diff --git a/src/KubernetesClient/Kubernetes.Watch.cs b/src/KubernetesClient/Kubernetes.Watch.cs
+index 9ecf56e..0ee8b33 100644
+--- a/src/KubernetesClient/Kubernetes.Watch.cs
++++ b/src/KubernetesClient/Kubernetes.Watch.cs
+@@ -150,7 +150,7 @@ namespace k8s
+             }
+ 
+             var stream = await httpResponse.Content.ReadAsStreamAsync().ConfigureAwait(false);
+-            StreamReader reader = new StreamReader(stream);
++            PeekableStreamReader reader = new PeekableStreamReader(stream);
+ 
+             return new Watcher<T>(reader, onEvent, onError, onClosed);
+         }
+diff --git a/src/KubernetesClient/PeekableStreamReader.cs b/src/KubernetesClient/PeekableStreamReader.cs
+new file mode 100755
+index 0000000..1465b5b
+--- /dev/null
++++ b/src/KubernetesClient/PeekableStreamReader.cs
+@@ -0,0 +1,133 @@
++using System;
++using System.Collections.Generic;
++using System.IO;
++using System.Text;
++using System.Threading;
++using System.Threading.Tasks;
++
++namespace k8s
++{
++    public class PeekableStreamReader : IAsyncLineReader
++    {
++        private readonly int _maxLineLength;
++        private readonly Queue<string> _peek = new Queue<string>();
++        private Stream _stream;
++        private byte[] _buf = new byte[4096];
++        private int _bufPos = 0;
++        private int _bufLength = 0;
++        private bool _eof = false;
++
++        public PeekableStreamReader(Stream stream, int maxLineLength = Int32.MaxValue)
++        {
++            // This is arbitrary, but ~8k lines are not abnormal
++            if (maxLineLength < 32768)
++            {
++                throw new ArgumentOutOfRangeException(nameof(maxLineLength),
++                    "The maximum line length must be at least 32768");
++            }
++            _maxLineLength = maxLineLength;
++            _stream = stream ?? throw new ArgumentNullException(nameof(stream));
++        }
++
++        private void ShuffleConsumedBytes(byte[] dst)
++        {
++            if (_bufPos < _bufLength)
++            {
++                Buffer.BlockCopy(_buf, _bufPos, dst, 0, _bufLength - _bufPos);
++            }
++            _bufLength -= _bufPos;
++            _bufPos = 0;
++        }
++
++        private void CheckDisposed()
++        {
++            if (_stream == null)
++            {
++                throw new ObjectDisposedException("PeekableStreamReader");
++            }
++        }
++
++        private async Task<string> ReadLineNoPeekAsync(CancellationToken cancellationToken)
++        {
++
++            for (; ; )
++            {
++                // read buffered data
++                if (_bufPos < _bufLength)
++                {
++                    int nlPos = _eof ? _bufLength - 1 : Array.IndexOf(_buf, (byte)'\n', _bufPos, _bufLength - _bufPos);
++                    if (nlPos >= 0)
++                    {
++                        string result = Encoding.UTF8.GetString(_buf, _bufPos, nlPos - _bufPos + 1);
++                        _bufPos = nlPos + 1;
++                        return result;
++                    }
++                }
++                if (_eof)
++                {
++                    return null;
++                }
++                // consume any previously read data
++                if (_bufPos > 0)
++                {
++                    ShuffleConsumedBytes(_buf);
++                }
++                // make the buffer bigger if needed
++                int left = _buf.Length - _bufLength;
++                if (left < 512)
++                {
++                    int newlen = Math.Min(_maxLineLength / 2, _buf.Length) * 2;
++                    if (newlen <= _buf.Length)
++                    {
++                        throw new InvalidOperationException(
++                            "Reading from the stream failed because a line from the server was unexpectedly " +
++                            $"greater than the configured maximum line length of {_maxLineLength}");
++                    }
++                    byte[] newbuf = new byte[newlen];
++                    ShuffleConsumedBytes(newbuf);
++                    _buf = newbuf;
++                }
++
++                int read = await _stream.ReadAsync(_buf, _bufLength,
++                    _buf.Length - _bufLength, cancellationToken).ConfigureAwait(false);
++                _bufLength += read;
++                _eof = read == 0;
++            }
++        }
++
++        public async Task<string> ReadLineAsync(CancellationToken cancellationToken)
++        {
++            CheckDisposed();
++
++            if (_peek.Count > 0)
++            {
++                return _peek.Dequeue();
++            }
++            return await ReadLineNoPeekAsync(cancellationToken).ConfigureAwait(false);
++        }
++
++        public async Task<string> PeekLineAsync(CancellationToken cancellationToken)
++        {
++            CheckDisposed();
++
++            var line = await ReadLineNoPeekAsync(cancellationToken).ConfigureAwait(false);
++            _peek.Enqueue(line);
++            return line;
++        }
++
++        public void Dispose()
++        {
++            Dispose(true);
++            GC.SuppressFinalize(this);
++        }
++
++        protected virtual void Dispose(bool disposing)
++        {
++            if (_stream != null)
++            {
++                _stream.Dispose();
++                _stream = null;
++            }
++        }
++    }
++}
+diff --git a/src/KubernetesClient/Watcher.cs b/src/KubernetesClient/Watcher.cs
+old mode 100644
+new mode 100755
+index da730f7..9c15660
+--- a/src/KubernetesClient/Watcher.cs
++++ b/src/KubernetesClient/Watcher.cs
+@@ -29,14 +29,14 @@ namespace k8s
+         public bool Watching { get; private set; }
+ 
+         private readonly CancellationTokenSource _cts;
+-        private readonly StreamReader _streamReader;
++        private readonly IAsyncLineReader _lineReader;
+         private readonly Task _watcherLoop;
+ 
+         /// <summary>
+         /// Initializes a new instance of the <see cref="Watcher{T}"/> class.
+         /// </summary>
+-        /// <param name="streamReader">
+-        /// A <see cref="StreamReader"/> from which to read the events.
++        /// <param name="lineReader">
++        /// An <see cref="IAsyncLineReader"/> from which to read the events.
+         /// </param>
+         /// <param name="onEvent">
+         /// The action to invoke when the server sends a new event.
+@@ -47,14 +47,18 @@ namespace k8s
+         /// <param name="onClosed">
+         /// The action to invoke when the server closes the connection.
+         /// </param>
+-        public Watcher(StreamReader streamReader, Action<WatchEventType, T> onEvent, Action<Exception> onError, Action onClosed = null)
++        /// <param name="cancellationToken">
++        /// A token that can be used to cancel the read
++        /// </param>
++        public Watcher(IAsyncLineReader lineReader, Action<WatchEventType, T> onEvent, Action<Exception> onError,
++            Action onClosed = null, CancellationToken cancellationToken = default(CancellationToken))
+         {
+-            _streamReader = streamReader;
++            _lineReader = lineReader;
+             OnEvent += onEvent;
+             OnError += onError;
+             OnClosed += onClosed;
+ 
+-            _cts = new CancellationTokenSource();
++            _cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+             _watcherLoop = this.WatcherLoop(_cts.Token);
+         }
+ 
+@@ -62,7 +66,7 @@ namespace k8s
+         public void Dispose()
+         {
+             _cts.Cancel();
+-            _streamReader.Dispose();
++            _lineReader.Dispose();
+         }
+ 
+         /// <summary>
+@@ -98,7 +102,7 @@ namespace k8s
+                 string line;
+ 
+                 // ReadLineAsync will return null when we've reached the end of the stream.
+-                while ((line = await this._streamReader.ReadLineAsync().ConfigureAwait(false)) != null)
++                while ((line = await this._lineReader.ReadLineAsync(cancellationToken).ConfigureAwait(false)) != null)
+                 {
+                     if (cancellationToken.IsCancellationRequested)
+                     {
+@@ -153,13 +157,15 @@ namespace k8s
+         /// <param name="onClosed">
+         /// The action to invoke when the server closes the connection.
+         /// </param>
++        /// <param name="cancellationToken">A token that can be used to cancel the watch</param>
+         /// <returns>a watch object</returns>
+         public static Watcher<T> Watch<T>(this HttpOperationResponse response,
+             Action<WatchEventType, T> onEvent,
+             Action<Exception> onError = null,
+-            Action onClosed = null)
++            Action onClosed = null,
++            CancellationToken cancellationToken = default(CancellationToken))
+         {
+-            if (!(response.Response.Content is WatcherDelegatingHandler.LineSeparatedHttpContent content))
++            if (!(response.Response.Content is ILineSeparatedHttpContent content))
+             {
+                 throw new KubernetesClientException("not a watchable request or failed response");
+             }
+@@ -177,13 +183,119 @@ namespace k8s
+         /// <param name="onClosed">
+         /// The action to invoke when the server closes the connection.
+         /// </param>
++        /// <param name="cancellationToken">A token that can be used to cancel the read</param>
+         /// <returns>a watch object</returns>
+         public static Watcher<T> Watch<T>(this HttpOperationResponse<T> response,
+             Action<WatchEventType, T> onEvent,
+             Action<Exception> onError = null,
+-            Action onClosed = null)
++            Action onClosed = null,
++            CancellationToken cancellationToken = default(CancellationToken))
++        {
++            return Watch((HttpOperationResponse)response, onEvent, onError, onClosed, cancellationToken);
++        }
++
++        /// <summary>
++        /// watch the call to api server with watch=true asynchronously
++        /// </summary>
++        /// <typeparam name="T">type of the event object</typeparam>
++        /// <param name="response">the api response</param>
++        /// <param name="onEvent">a callback when any event raised from api server</param>
++        /// <param name="onError">a callbak when any exception was caught during watching</param>
++        /// <param name="onClosed">
++        /// The action to invoke when the server closes the connection.
++        /// </param>
++        /// <param name="cancellationToken">A token that can be used to cancel the watch</param>
++        /// <returns>a watch object</returns>
++        public static async Task WatchAsync<T>(this HttpOperationResponse response,
++            Func<CancellationToken, WatchEventType, T, Task> onEvent,
++            Func<CancellationToken, Exception, Task> onError = null,
++            Func<CancellationToken, Task> onClosed = null,
++            CancellationToken cancellationToken = default(CancellationToken))
++        {
++            if (!(response.Response.Content is ILineSeparatedHttpContent content))
++            {
++                throw new KubernetesClientException("not a watchable request or failed response");
++            }
++
++            try
++            {
++                string line;
++                // ReadLineAsync will return null when we've reached the end of the stream.
++                while ((line = await content.StreamReader.ReadLineAsync(cancellationToken).ConfigureAwait(false)) != null)
++                {
++                    if (cancellationToken.IsCancellationRequested)
++                    {
++                        return;
++                    }
++
++                    try
++                    {
++                        var genericEvent = SafeJsonConvert.DeserializeObject<k8s.Watcher<KubernetesObject>.WatchEvent>(line);
++
++                        if (genericEvent.Object.Kind == "Status")
++                        {
++                            var statusEvent = SafeJsonConvert.DeserializeObject<k8s.Watcher<V1Status>.WatchEvent>(line);
++                            if (onError != null)
++                            {
++                                var exception = new KubernetesException(statusEvent.Object);
++                                await onError(cancellationToken, exception).ConfigureAwait(false);
++                            }
++                        }
++                        else
++                        {
++                            var @event = SafeJsonConvert.DeserializeObject<k8s.Watcher<T>.WatchEvent>(line);
++                            if (onEvent != null)
++                            {
++                                await onEvent(cancellationToken, @event.Type, @event.Object).ConfigureAwait(false);
++                            }
++                        }
++                    }
++                    catch (Exception e)
++                    {
++                        // error if deserialized failed or onevent throws
++                        if (onError != null)
++                        {
++                            await onError(cancellationToken, e).ConfigureAwait(false);
++                        }
++                    }
++                }
++            }
++            catch (Exception e)
++            {
++                // error when transport error, IOException ect
++                if (onError != null)
++                {
++                    await onError(cancellationToken, e).ConfigureAwait(false);
++                }
++            }
++            finally
++            {
++                if (onClosed != null)
++                {
++                    await onClosed(cancellationToken).ConfigureAwait(false);
++                }
++            }
++        }
++
++        /// <summary>
++        /// watch the call to api server with watch=true asynchronously
++        /// </summary>
++        /// <typeparam name="T">type of the event object</typeparam>
++        /// <param name="response">the api response</param>
++        /// <param name="onEvent">a callback when any event raised from api server</param>
++        /// <param name="onError">a callbak when any exception was caught during watching</param>
++        /// <param name="onClosed">
++        /// The action to invoke when the server closes the connection.
++        /// </param>
++        /// <param name="cancellationToken">A token that can be used to cancel the watch</param>
++        /// <returns>a watch object</returns>
++        public static Task WatchAsync<T>(this HttpOperationResponse<T> response,
++            Func<CancellationToken, WatchEventType, T, Task> onEvent,
++            Func<CancellationToken, Exception, Task> onError = null,
++            Func<CancellationToken, Task> onClosed = null,
++            CancellationToken cancellationToken = default(CancellationToken))
+         {
+-            return Watch((HttpOperationResponse)response, onEvent, onError, onClosed);
++            return WatchAsync((HttpOperationResponse)response, onEvent, onError, onClosed, cancellationToken);
+         }
+     }
+ }
+diff --git a/src/KubernetesClient/WatcherDelegatingHandler.cs b/src/KubernetesClient/WatcherDelegatingHandler.cs
+index 401fe8b..148795b 100644
+--- a/src/KubernetesClient/WatcherDelegatingHandler.cs
++++ b/src/KubernetesClient/WatcherDelegatingHandler.cs
+@@ -1,15 +1,23 @@
+-using System;
+-using System.Collections.Generic;
+ using System.IO;
+ using System.Linq;
+ using System.Net;
+ using System.Net.Http;
++using System.Text;
+ using System.Threading;
+ using System.Threading.Tasks;
+ using Microsoft.AspNetCore.WebUtilities;
+ 
+ namespace k8s
+ {
++    /// <summary>
++    /// Represents line separated http content returned from ?watch=true calls
++    /// </summary>
++    public interface ILineSeparatedHttpContent
++    {
++        /// <summary>A stream reader for the content</summary>
++        IAsyncLineReader StreamReader { get; }
++    }
++
+     /// <summary>
+     /// This HttpDelegatingHandler is to rewrite the response and return first line to autorest client
+     /// then use WatchExt to create a watch object which interact with the replaced http response to get watch works.
+@@ -27,38 +35,42 @@ namespace k8s
+ 
+                 if (query.TryGetValue("watch", out var values) && values.Any(v => v == "true"))
+                 {
+-                    originResponse.Content = new LineSeparatedHttpContent(originResponse.Content);
++                    originResponse.Content = new LineSeparatedHttpContent(originResponse.Content,
++                        cancellationToken);
+                 }
+             }
+             return originResponse;
+         }
+ 
+-        internal class LineSeparatedHttpContent : HttpContent
++        internal class LineSeparatedHttpContent : HttpContent, ILineSeparatedHttpContent
+         {
+             private readonly HttpContent _originContent;
+             private Stream _originStream;
++            // This is to workaround https://github.com/dotnet/corefx/issues/9071
++            private CancellationToken _cancellationToken;
+ 
+-            public LineSeparatedHttpContent(HttpContent originContent)
++            public LineSeparatedHttpContent(HttpContent originContent,
++                CancellationToken cancellationToken)
+             {
+                 _originContent = originContent;
++                _cancellationToken = cancellationToken;
+             }
+ 
+-            internal PeekableStreamReader StreamReader { get; private set; }
++            public IAsyncLineReader StreamReader { get; private set; }
+ 
+             protected override async Task SerializeToStreamAsync(Stream stream, TransportContext context)
+             {
+                 _originStream = await _originContent.ReadAsStreamAsync();
+ 
+-                StreamReader = new PeekableStreamReader(_originStream);
++                var peekableStreamReader = new PeekableStreamReader(_originStream);
++                StreamReader = peekableStreamReader;
+ 
+-                var firstLine = await StreamReader.PeekLineAsync();
+-
+-                var writer = new StreamWriter(stream);
+-
+-//                using (writer) // leave open
++                var firstLine = await peekableStreamReader.PeekLineAsync(_cancellationToken);
++                if (!string.IsNullOrEmpty(firstLine))
+                 {
+-                    await writer.WriteAsync(firstLine);
+-                    await writer.FlushAsync();
++                    var lineBytes = Encoding.UTF8.GetBytes(firstLine);
++                    await stream.WriteAsync(lineBytes, 0, lineBytes.Length, _cancellationToken);
++                    await stream.FlushAsync(_cancellationToken);
+                 }
+             }
+ 
+@@ -68,66 +80,5 @@ namespace k8s
+                 return false;
+             }
+         }
+-        internal class PeekableStreamReader : StreamReader
+-        {
+-            private Queue<string> _buffer;
+-            public PeekableStreamReader(Stream stream) : base(stream)
+-            {
+-                _buffer = new Queue<string>();
+-            }
+-
+-            public override string ReadLine()
+-            {
+-                if (_buffer.Count > 0)
+-                {
+-                    return _buffer.Dequeue();
+-                }
+-                return base.ReadLine();
+-            }
+-            public override Task<string> ReadLineAsync()
+-            {
+-                if (_buffer.Count > 0)
+-                {
+-                    return Task.FromResult(_buffer.Dequeue());
+-                }
+-                return base.ReadLineAsync();
+-            }
+-            public async Task<string> PeekLineAsync()
+-            {
+-                var line = await ReadLineAsync();
+-                _buffer.Enqueue(line);
+-                return line;
+-            }
+-
+-            public override int Read()
+-            {
+-                throw new NotImplementedException();
+-            }
+-
+-            public override int Read(char[] buffer, int index, int count)
+-            {
+-                throw new NotImplementedException();
+-            }
+-            public override Task<int> ReadAsync(char[] buffer, int index, int count)
+-            {
+-                throw new NotImplementedException();
+-            }
+-            public override int ReadBlock(char[] buffer, int index, int count)
+-            {
+-                throw new NotImplementedException();
+-            }
+-            public override Task<int> ReadBlockAsync(char[] buffer, int index, int count)
+-            {
+-                throw new NotImplementedException();
+-            }
+-            public override string ReadToEnd()
+-            {
+-                throw new NotImplementedException();
+-            }
+-            public override Task<string> ReadToEndAsync()
+-            {
+-                throw new NotImplementedException();
+-            }
+-        }
+     }
+ }
+diff --git a/tests/KubernetesClient.Tests/PeekableLineStreamReaderTests.cs b/tests/KubernetesClient.Tests/PeekableLineStreamReaderTests.cs
+new file mode 100755
+index 0000000..9127afe
+--- /dev/null
++++ b/tests/KubernetesClient.Tests/PeekableLineStreamReaderTests.cs
+@@ -0,0 +1,137 @@
++using k8s.Models;
++using System;
++using System.IO;
++using System.Text;
++using System.Threading;
++using System.Threading.Tasks;
++using Xunit;
++
++namespace k8s.Tests
++{
++    public class PeekableLineStreamReaderTest
++    {
++        private PeekableStreamReader CreateStream(string input, int maxLineLength = Int32.MaxValue)
++        {
++            var memoryStream = new MemoryStream();
++            var bytes = Encoding.UTF8.GetBytes(input);
++            memoryStream.Write(bytes, 0, bytes.Length);
++            memoryStream.Position = 0;
++            return new PeekableStreamReader(memoryStream, maxLineLength);
++        }
++
++        [Fact]
++        public void CreateNullStreamThrows()
++        {
++            Assert.Throws<ArgumentNullException>(() =>
++                new PeekableStreamReader(null));
++        }
++
++        [Fact]
++        public void CreateNegativeMaxLineLengthThrows()
++        {
++            Assert.Throws<ArgumentOutOfRangeException>(() =>
++            {
++                using (var ms = new MemoryStream())
++                {
++                    new PeekableStreamReader(ms, -1);
++                }
++            });
++        }
++
++        [Fact]
++        public void PeekDisposedThrows()
++        {
++            using (var peekableStream = CreateStream("one\ntwo\nthree"))
++            {
++                peekableStream.Dispose();
++                Assert.ThrowsAsync<ObjectDisposedException>(
++                    async () => await peekableStream.PeekLineAsync(CancellationToken.None));
++            }
++        }
++
++        [Fact]
++        public void ReadDisposedThrows()
++        {
++            using (var peekableStream = CreateStream("one\ntwo\nthree"))
++            {
++                peekableStream.Dispose();
++                peekableStream.Dispose();
++                Assert.ThrowsAsync<ObjectDisposedException>(
++                    async () => await peekableStream.ReadLineAsync(CancellationToken.None));
++            }
++        }
++
++        [Fact]
++        public async Task PeekAllThenRead()
++        {
++            var ct = CancellationToken.None;
++            using (var peekableStream = CreateStream("one\ntwo\nthree\n"))
++            {
++                Assert.Equal("one\n", await peekableStream.PeekLineAsync(ct));
++                Assert.Equal("two\n", await peekableStream.PeekLineAsync(ct));
++                Assert.Equal("three\n", await peekableStream.PeekLineAsync(ct));
++                Assert.Null(await peekableStream.PeekLineAsync(ct));
++                Assert.Equal("one\n", await peekableStream.ReadLineAsync(ct));
++                Assert.Equal("two\n", await peekableStream.ReadLineAsync(ct));
++                Assert.Equal("three\n", await peekableStream.ReadLineAsync(ct));
++                Assert.Null(await peekableStream.ReadLineAsync(ct));
++            }
++        }
++
++        [Fact]
++        public async Task ReadWithBigLines()
++        {
++            var sb = new StringBuilder();
++            sb.Append("one\n");
++            sb.Append("two\n");
++            sb.Append('9', 4500).Append('\n');
++            sb.Append("three\n");
++            sb.Append('6', 17432).Append('\n');
++            var ct = CancellationToken.None;
++            using (var peekableStream = CreateStream(sb.ToString()))
++            {
++                Assert.Equal("one\n", await peekableStream.ReadLineAsync(ct));
++                Assert.Equal("two\n", await peekableStream.ReadLineAsync(ct));
++                Assert.Equal(new String('9', 4500) + "\n", await peekableStream.ReadLineAsync(ct));
++                Assert.Equal("three\n", await peekableStream.ReadLineAsync(ct));
++                Assert.Equal(new String('6', 17432) + "\n", await peekableStream.ReadLineAsync(ct));
++            }
++        }
++
++        [Fact]
++        public async Task ReadLastLineWithNoNL()
++        {
++            var ct = CancellationToken.None;
++            using (var peekableStream = CreateStream("one\ntwo\nthree"))
++            {
++                Assert.Equal("one\n", await peekableStream.ReadLineAsync(ct));
++                Assert.Equal("two\n", await peekableStream.ReadLineAsync(ct));
++                Assert.Equal("three", await peekableStream.ReadLineAsync(ct));
++                Assert.Null(await peekableStream.ReadLineAsync(ct));
++                Assert.Null(await peekableStream.ReadLineAsync(ct));
++            }
++        }
++
++        [Fact]
++        public async Task ReadLineOfMaximumLengthSucceeds()
++        {
++            var ct = CancellationToken.None;
++            var s = new string('X', 32767) + "\n";
++            using (var peekableStream = CreateStream(s, 32768))
++            {
++                Assert.Equal(s, await peekableStream.ReadLineAsync(ct));
++            }
++        }
++
++        [Fact]
++        public void ReadLineBiggerThanMaxThrows()
++        {
++            var ct = CancellationToken.None;
++            using (var peekableStream = CreateStream(new string('6', 32769), 32768))
++            {
++                Assert.ThrowsAsync<InvalidOperationException>(
++                    async () => await peekableStream.ReadLineAsync(ct));
++            }
++        }
++    }
++}
+diff --git a/tests/KubernetesClient.Tests/WatchTests.cs b/tests/KubernetesClient.Tests/WatchTests.cs
+old mode 100644
+new mode 100755
+index 0b61dcd..5337d52
+--- a/tests/KubernetesClient.Tests/WatchTests.cs
++++ b/tests/KubernetesClient.Tests/WatchTests.cs
+@@ -13,6 +13,7 @@ using k8s.Models;
+ using k8s.Tests.Mock;
+ using Microsoft.AspNetCore.Http;
+ using Microsoft.Extensions.Logging;
++using Microsoft.Rest;
+ using Newtonsoft.Json;
+ using Newtonsoft.Json.Converters;
+ using Nito.AsyncEx;
+@@ -21,6 +22,72 @@ using Xunit.Abstractions;
+ 
+ namespace k8s.Tests
+ {
++    class MockLineStreamReader : IAsyncLineReader
++    {
++        private readonly List<string> _lines;
++        private readonly int _blockAtLine;
++        private readonly int _exceptionAtLine;
++        private int _pos;
++
++        public MockLineStreamReader(
++            IEnumerable<string> lines,
++            int blockAtLine = -1,
++            int exceptionAtLine = -1)
++        {
++            _blockAtLine = blockAtLine;
++            _exceptionAtLine = exceptionAtLine;
++            _lines = lines.ToList();
++        }
++
++        public async Task<string> ReadLineAsync(CancellationToken cancellationToken)
++        {
++            if (_exceptionAtLine == _pos)
++            {
++                throw new Exception("io failure");
++            }
++            if (_blockAtLine == _pos)
++            {
++                try
++                {
++                    await Task.Delay(-1, cancellationToken);
++                }
++                catch (OperationCanceledException)
++                {
++                }
++            }
++            return _pos < _lines.Count ? _lines[_pos++] : null;
++        }
++
++        public void Dispose()
++        {
++        }
++    }
++
++    class MockOtherHttpContent : HttpContent
++    {
++        protected override Task SerializeToStreamAsync(Stream stream, TransportContext context) =>
++            throw new NotImplementedException();
++
++        protected override bool TryComputeLength(out long length) =>
++            throw new NotImplementedException();
++    }
++
++    class MockLineSeparatedHttpContent : HttpContent, ILineSeparatedHttpContent
++    {
++        public IAsyncLineReader StreamReader { get; private set; }
++
++        public MockLineSeparatedHttpContent(IAsyncLineReader streamReader)
++        {
++            StreamReader = streamReader;
++        }
++
++        protected override Task SerializeToStreamAsync(Stream stream, TransportContext context) =>
++            Task.CompletedTask;
++
++        protected override bool TryComputeLength(out long length) =>
++            throw new NotImplementedException();
++    }
++
+     public class WatchTests
+     {
+         private static readonly string MockAddedEventStreamLine = BuildWatchEventStreamLine(WatchEventType.Added);
+@@ -28,6 +95,12 @@ namespace k8s.Tests
+         private static readonly string MockModifiedStreamLine = BuildWatchEventStreamLine(WatchEventType.Modified);
+         private static readonly string MockErrorStreamLine = BuildWatchEventStreamLine(WatchEventType.Error);
+         private static readonly string MockBadStreamLine = "bad json";
++        private static readonly string MockStatusLine = JsonConvert.SerializeObject(
++            new Watcher<V1Status>.WatchEvent
++            {
++                Type = WatchEventType.Error,
++                Object = new V1Status(kind: "Status", reason: "test status")
++            }, new StringEnumConverter());
+         private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(150);
+ 
+         private readonly ITestOutputHelper testOutput;
+@@ -708,5 +781,146 @@ namespace k8s.Tests
+             }
+         }
+ 
++        [Fact]
++        public void WatchFailsWithIncorrectContentType()
++        {
++            var ct = CancellationToken.None;
++            var response = new HttpOperationResponse<V1Pod>
++            {
++                Response = new HttpResponseMessage
++                {
++                    Content = new MockOtherHttpContent()
++                }
++            };
++            Assert.ThrowsAsync<KubernetesClientException>(
++                async () => await response.WatchAsync(
++                    (ct_, evt, pod) => Task.CompletedTask,
++                    cancellationToken: ct));
++        }
++
++        private HttpOperationResponse<V1Pod> MakeResponse(MockLineStreamReader reader)
++        {
++            var content = new MockLineSeparatedHttpContent(reader);
++            var response = new HttpOperationResponse<V1Pod>
++            {
++                Response = new HttpResponseMessage
++                {
++                    Content = content
++                }
++            };
++            return response;
++        }
++
++        [Fact]
++        public async Task WatchCanBeCancelled()
++        {
++            var reader = new MockLineStreamReader(new string[0], 0);
++            var response = MakeResponse(reader);
++            var cts = new CancellationTokenSource();
++            var task = response.WatchAsync((ct, evt, pod) => Task.CompletedTask,
++                cancellationToken: cts.Token);
++            cts.Cancel();
++            await task;
++        }
++
++        [Fact]
++        public async Task WatchCanBeCancelledWithoutLSRReturningNull()
++        {
++            var reader = new MockLineStreamReader(new string[]
++            {
++                MockAddedEventStreamLine
++            }, 0);
++            var response = MakeResponse(reader);
++            var cts = new CancellationTokenSource();
++            var task = response.WatchAsync((ct, evt, pod) => Task.CompletedTask,
++                cancellationToken: cts.Token);
++            cts.Cancel();
++            await task;
++        }
++
++        [Fact]
++        public async Task WatchStopsOnIoException()
++        {
++            var reader = new MockLineStreamReader(new string[0], -1, 0);
++            var response = MakeResponse(reader);
++            var cts = new CancellationTokenSource();
++
++            var events = new List<WatchEventType>();
++            var exceptions = new List<Exception>();
++            var onCloseCalled = false;
++
++            var task = response.WatchAsync(
++                (ct, evt, pod) => Task.CompletedTask,
++                (ct, ex) =>
++                {
++                    exceptions.Add(ex);
++                    return Task.CompletedTask;
++                },
++                (ct) =>
++                {
++                    onCloseCalled = true;
++                    return Task.CompletedTask;
++                }, CancellationToken.None);
++            await task;
++
++            Assert.True(onCloseCalled);
++            Assert.Single(exceptions);
++            Assert.Equal("io failure", exceptions[0].Message);
++        }
++
++
++        [Fact]
++        public async Task WatchHandlesAllTypes()
++        {
++            var reader = new MockLineStreamReader(new[]
++            {
++                MockAddedEventStreamLine,
++                MockBadStreamLine,
++                MockModifiedStreamLine,
++                MockBadStreamLine,
++                MockDeletedStreamLine,
++                MockBadStreamLine,
++                MockErrorStreamLine,
++                MockStatusLine
++            });
++            var response = MakeResponse(reader);
++
++            var ct = CancellationToken.None;
++            var events = new List<WatchEventType>();
++            var exceptions = new List<Exception>();
++            var onCloseCalled = false;
++            await response.WatchAsync(
++                (ct_, evt, pod) =>
++                {
++                    events.Add(evt);
++                    return Task.CompletedTask;
++                },
++                (ct_, ex) =>
++                {
++                    exceptions.Add(ex);
++                    return Task.CompletedTask;
++                },
++                (ct_) =>
++                {
++                    onCloseCalled = true;
++                    return Task.CompletedTask;
++                }, ct);
++
++            Assert.True(onCloseCalled);
++            Assert.Equal(new WatchEventType[]
++            {
++                WatchEventType.Added,
++                WatchEventType.Modified,
++                WatchEventType.Deleted,
++                WatchEventType.Error
++            }, events);
++            Assert.Equal(4, exceptions.Count);
++            Assert.IsType<JsonReaderException>(exceptions[0]);
++            Assert.IsType<JsonReaderException>(exceptions[1]);
++            Assert.IsType<JsonReaderException>(exceptions[2]);
++            Assert.IsType<KubernetesException>(exceptions[3]);
++            var k8se = (KubernetesException)exceptions[3];
++            Assert.Equal("test status", k8se.Status.Reason);
++        }
+     }
+ }
+diff --git a/tests/KubernetesClient.Tests/WatcherTests.cs b/tests/KubernetesClient.Tests/WatcherTests.cs
+index 1aa71ce..df5361e 100644
+--- a/tests/KubernetesClient.Tests/WatcherTests.cs
++++ b/tests/KubernetesClient.Tests/WatcherTests.cs
+@@ -3,10 +3,31 @@ using System;
+ using System.IO;
+ using System.Text;
+ using System.Threading;
++using System.Threading.Tasks;
+ using Xunit;
+ 
+ namespace k8s.Tests
+ {
++    class LineStreamReader : IAsyncLineReader
++    {
++        private readonly StreamReader _stream;
++
++        public LineStreamReader(Stream stream)
++        {
++            _stream = new StreamReader(stream);
++        }
++
++        public async Task<string> ReadLineAsync(CancellationToken cancellationToken)
++        {
++            return await _stream.ReadLineAsync();
++        }
++
++        public void Dispose()
++        {
++            _stream.Dispose();
++        }
++    }
++
+     public class WatcherTests
+     {
+         [Fact]
+@@ -15,7 +36,7 @@ namespace k8s.Tests
+             byte[] data = Encoding.UTF8.GetBytes("{\"type\":\"ERROR\",\"object\":{\"kind\":\"Status\",\"apiVersion\":\"v1\",\"metadata\":{},\"status\":\"Failure\",\"message\":\"too old resource version: 44982(53593)\",\"reason\":\"Gone\",\"code\":410}}");
+ 
+             using (MemoryStream stream = new MemoryStream(data))
+-            using (StreamReader reader = new StreamReader(stream))
++            using (LineStreamReader reader = new LineStreamReader(stream))
+             {
+                 Exception recordedException = null;
+                 ManualResetEvent mre = new ManualResetEvent(false);

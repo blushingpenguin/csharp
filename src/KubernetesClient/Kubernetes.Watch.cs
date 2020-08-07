@@ -1,7 +1,6 @@
 using Microsoft.Rest;
 using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Net;
 using System.Net.Http;
 using System.Text;
@@ -163,8 +162,7 @@ namespace k8s
             return new Watcher<T>(async () =>
             {
                 var stream = await httpResponse.Content.ReadAsStreamAsync().ConfigureAwait(false);
-                StreamReader reader = new StreamReader(stream);
-
+                PeekableStreamReader reader = new PeekableStreamReader(stream, timeout: HttpClient.Timeout);
                 return reader;
             }, onEvent, onError, onClosed);
         }

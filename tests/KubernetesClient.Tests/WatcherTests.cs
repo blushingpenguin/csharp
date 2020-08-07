@@ -8,6 +8,26 @@ using Xunit;
 
 namespace k8s.Tests
 {
+    class LineStreamReader : IAsyncLineReader
+    {
+        private readonly StreamReader _stream;
+
+        public LineStreamReader(Stream stream)
+        {
+            _stream = new StreamReader(stream);
+        }
+
+        public async Task<string> ReadLineAsync(CancellationToken cancellationToken)
+        {
+            return await _stream.ReadLineAsync();
+        }
+
+        public void Dispose()
+        {
+            _stream.Dispose();
+        }
+    }
+
     public class WatcherTests
     {
         [Fact]
@@ -17,7 +37,7 @@ namespace k8s.Tests
                 "{\"type\":\"ERROR\",\"object\":{\"kind\":\"Status\",\"apiVersion\":\"v1\",\"metadata\":{},\"status\":\"Failure\",\"message\":\"too old resource version: 44982(53593)\",\"reason\":\"Gone\",\"code\":410}}");
 
             using (MemoryStream stream = new MemoryStream(data))
-            using (StreamReader reader = new StreamReader(stream))
+            using (IAsyncLineReader reader = new LineStreamReader(stream))
             {
                 Exception recordedException = null;
                 ManualResetEvent mre = new ManualResetEvent(false);

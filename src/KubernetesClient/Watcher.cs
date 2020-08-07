@@ -58,30 +58,7 @@ namespace k8s
         /// <param name="onClosed">
         /// The action to invoke when the server closes the connection.
         /// </param>
-        public Watcher(Func<Task<StreamReader>> streamReaderCreator, Action<WatchEventType, T> onEvent,
-            Action<Exception> onError, Action onClosed = null)
-            : this(
-                async () => (TextReader)await streamReaderCreator().ConfigureAwait(false),
-                onEvent, onError, onClosed)
-        {
-        }
-
-        /// <summary>
-        /// Initializes a new instance of the <see cref="Watcher{T}"/> class.
-        /// </summary>
-        /// <param name="streamReader">
-        /// A <see cref="StreamReader"/> from which to read the events.
-        /// </param>
-        /// <param name="onEvent">
-        /// The action to invoke when the server sends a new event.
-        /// </param>
-        /// <param name="onError">
-        /// The action to invoke when an error occurs.
-        /// </param>
-        /// <param name="onClosed">
-        /// The action to invoke when the server closes the connection.
-        /// </param>
-        public Watcher(Func<Task<TextReader>> streamReaderCreator, Action<WatchEventType, T> onEvent,
+        public Watcher(Func<Task<IAsyncLineReader>> streamReaderCreator, Action<WatchEventType, T> onEvent,
             Action<Exception> onError, Action onClosed = null)
         {
             OnEvent += onEvent;
@@ -144,7 +121,7 @@ namespace k8s
         }
 
         internal static async Task WatchAsync(
-            Func<Task<TextReader>> streamReaderCreator,
+            Func<Task<IAsyncLineReader>> streamReaderCreator,
             Func<CancellationToken, WatchEventType, T, Task> onEvent,
             Func<CancellationToken, Exception, Task> onError = null,
             Func<CancellationToken, Task> onClosed = null,
@@ -155,7 +132,7 @@ namespace k8s
                 var streamReader = await streamReaderCreator().ConfigureAwait(false);
                 string line;
                 // ReadLineAsync will return null when we've reached the end of the stream.
-                while ((line = await streamReader.ReadLineAsync().ConfigureAwait(false)) != null)
+                while ((line = await streamReader.ReadLineAsync(cancellationToken).ConfigureAwait(false)) != null)
                 {
                     if (cancellationToken.IsCancellationRequested)
                     {
@@ -215,7 +192,7 @@ namespace k8s
 
     public static class WatcherExt
     {
-        private static async Task<TextReader> CreateStreamReaderAsync<L>(
+        private static async Task<IAsyncLineReader> CreateStreamReaderAsync<L>(
             Task<HttpOperationResponse<L>> responseTask
         )
         {

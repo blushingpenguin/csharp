@@ -184,7 +184,7 @@ namespace k8s
             }
         }
 
-        private void AppendDelegatingHandler<T>() where T : DelegatingHandler, new()
+        private T AppendDelegatingHandler<T>() where T : DelegatingHandler, new()
         {
             var cur = FirstMessageHandler as DelegatingHandler;
 
@@ -196,12 +196,14 @@ namespace k8s
                 {
                     // last one
                     // append watcher handler between to last handler
-                    cur.InnerHandler = new T { InnerHandler = cur.InnerHandler };
-                    break;
+                    var handler = new T { InnerHandler = cur.InnerHandler };
+                    cur.InnerHandler = handler;
+                    return handler;
                 }
 
                 cur = next;
             }
+            throw new InvalidOperationException("Unable to append a delegating handler");
         }
 
         // NOTE: this method replicates the logic that the base ServiceClient uses except that it doesn't insert the RetryDelegatingHandler
@@ -231,8 +233,8 @@ namespace k8s
                 }
             }
 
-            AppendDelegatingHandler<WatcherDelegatingHandler>();
-            HttpClient = new HttpClient(FirstMessageHandler, false);
+            var watcherHandler = AppendDelegatingHandler<WatcherDelegatingHandler>();
+            watcherHandler.HttpClient = HttpClient = new HttpClient(FirstMessageHandler, false);
         }
 
         /// <summary>
