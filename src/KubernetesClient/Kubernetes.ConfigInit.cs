@@ -168,7 +168,7 @@ namespace k8s
             SetCredentials(config);
             config.AddCertificates(HttpClientHandler);
 #if NET452
-            this.ClientCertificates = ((WebRequestHandler)handler).ClientCertificates;
+            this.ClientCertificates = ((WebRequestHandler)HttpClientHandler).ClientCertificates;
 #else
             this.ClientCertificates = HttpClientHandler.ClientCertificates;
 #endif
