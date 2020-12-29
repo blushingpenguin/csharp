@@ -36,12 +36,18 @@ namespace k8s
             return httpClientHandler;
         }
 
-        public void AddCertificates(HttpClientHandler handler)
+        public bool HasCertificate()
         {
-            if ((!string.IsNullOrWhiteSpace(this.ClientCertificateData) ||
+            return
+                (!string.IsNullOrWhiteSpace(this.ClientCertificateData) ||
                  !string.IsNullOrWhiteSpace(this.ClientCertificateFilePath)) &&
                 (!string.IsNullOrWhiteSpace(this.ClientCertificateKeyData) ||
-                 !string.IsNullOrWhiteSpace(this.ClientKeyFilePath)))
+                 !string.IsNullOrWhiteSpace(this.ClientKeyFilePath));
+        }
+
+        public void AddCertificates(HttpClientHandler handler)
+        {
+            if (HasCertificate())
             {
                 var cert = CertUtils.GeneratePfx(this);
 

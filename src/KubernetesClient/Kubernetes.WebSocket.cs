@@ -294,7 +294,7 @@ namespace k8s
 #if NET452
             foreach (var cert in ((WebRequestHandler)this.HttpClientHandler).ClientCertificates.OfType<X509Certificate2>())
 #else
-            foreach (var cert in this.HttpClientHandler.ClientCertificates.OfType<X509Certificate2>())
+            foreach (var cert in this.ClientCertificates.OfType<X509Certificate2>())
 #endif
             {
                 webSocketBuilder.AddClientCertificate(cert);
