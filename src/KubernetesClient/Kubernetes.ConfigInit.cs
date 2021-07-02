@@ -50,6 +50,11 @@ namespace k8s
             CaCerts = config.SslCaCerts;
             SkipTlsVerify = config.SkipTlsVerify;
             SetCredentials(config);
+            if (config.HasCertificate())
+            {
+                var cert = CertUtils.GeneratePfx(config);
+                ClientCertificates = new X509Certificate2Collection { cert };
+            }
         }
 
         /// <summary>
@@ -120,7 +125,7 @@ namespace k8s
 
             // set credentails for the kubernetes client
             SetCredentials(config);
-            config.AddCertificates(HttpClientHandler);
+            ClientCertificates = config.AddCertificates(HttpClientHandler);
         }
 
         private X509Certificate2Collection CaCerts { get; }

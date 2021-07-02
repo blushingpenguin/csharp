@@ -1,5 +1,6 @@
 using System;
 using System.Net.Http;
+using System.Security.Cryptography.X509Certificates;
 
 namespace k8s
 {
@@ -34,22 +35,31 @@ namespace k8s
             return httpClientHandler;
         }
 
-        public void AddCertificates(HttpClientHandler handler)
+        public bool HasCertificate()
+        {
+            return
+                (!string.IsNullOrWhiteSpace(this.ClientCertificateData) ||
+                 !string.IsNullOrWhiteSpace(this.ClientCertificateFilePath)) &&
+                (!string.IsNullOrWhiteSpace(this.ClientCertificateKeyData) ||
+                 !string.IsNullOrWhiteSpace(this.ClientKeyFilePath));
+        }
+
+        public X509CertificateCollection AddCertificates(HttpClientHandler handler)
         {
             if (handler == null)
             {
                 throw new ArgumentNullException(nameof(handler));
             }
 
-            if ((!string.IsNullOrWhiteSpace(ClientCertificateData) ||
-                 !string.IsNullOrWhiteSpace(ClientCertificateFilePath)) &&
-                (!string.IsNullOrWhiteSpace(ClientCertificateKeyData) ||
-                 !string.IsNullOrWhiteSpace(ClientKeyFilePath)))
+            if (HasCertificate())
             {
                 var cert = CertUtils.GeneratePfx(this);
 
                 handler.ClientCertificates.Add(cert);
+                return new X509CertificateCollection { cert };
             }
+
+            return null;
         }
 
         public static DelegatingHandler CreateWatchHandler() => new WatcherDelegatingHandler();
