@@ -1,8 +1,8 @@
+using System.Collections.Generic;
+using YamlDotNet.Serialization;
+
 namespace k8s.KubeConfigModels
 {
-    using System.Collections.Generic;
-    using YamlDotNet.Serialization;
-
     /// <summary>
     /// Contains information about how to communicate with a kubernetes cluster
     /// </summary>
@@ -37,6 +37,6 @@ namespace k8s.KubeConfigModels
         /// Gets or sets additional information. This is useful for extenders so that reads and writes don't clobber unknown fields.
         /// </summary>
         [YamlMember(Alias = "extensions")]
-        public IDictionary<string, dynamic> Extensions { get; set; }
+        public IEnumerable<NamedExtension> Extensions { get; set; }
     }
 }

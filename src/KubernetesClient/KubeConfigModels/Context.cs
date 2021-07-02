@@ -1,8 +1,9 @@
+using System;
+using System.Collections.Generic;
+using YamlDotNet.Serialization;
+
 namespace k8s.KubeConfigModels
 {
-    using System;
-    using YamlDotNet.Serialization;
-
     /// <summary>
     /// Relates nicknames to context information.
     /// </summary>
@@ -19,6 +20,13 @@ namespace k8s.KubeConfigModels
         /// </summary>
         [YamlMember(Alias = "name")]
         public string Name { get; set; }
+
+        /// <summary>
+        /// Gets or sets additional information. This is useful for extenders so that reads and writes don't clobber unknown fields.
+        /// </summary>
+        [YamlMember(Alias = "extensions")]
+        public IEnumerable<NamedExtension> Extensions { get; set; }
+
 
         [Obsolete("This property is not set by the YAML config. Use ContextDetails.Namespace instead.")]
         [YamlMember(Alias = "namespace")]

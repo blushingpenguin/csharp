@@ -8,9 +8,9 @@ using Xunit;
 
 namespace k8s.Tests
 {
-    public class PeekableLineStreamReaderTest
+    public class PeekableLineStreamReaderTests
     {
-        private PeekableStreamReader CreateStream(string input, int maxLineLength = Int32.MaxValue)
+        private PeekableStreamReader CreateStream(string input, int maxLineLength = int.MaxValue)
         {
             var memoryStream = new MemoryStream();
             var bytes = Encoding.UTF8.GetBytes(input);
@@ -45,7 +45,7 @@ namespace k8s.Tests
             {
                 peekableStream.Dispose();
                 Assert.ThrowsAsync<ObjectDisposedException>(
-                    async () => await peekableStream.PeekLineAsync(CancellationToken.None));
+                    async () => await peekableStream.PeekLineAsync(CancellationToken.None).ConfigureAwait(false));
             }
         }
 
@@ -57,7 +57,7 @@ namespace k8s.Tests
                 peekableStream.Dispose();
                 peekableStream.Dispose();
                 Assert.ThrowsAsync<ObjectDisposedException>(
-                    async () => await peekableStream.ReadLineAsync(CancellationToken.None));
+                    async () => await peekableStream.ReadLineAsync(CancellationToken.None).ConfigureAwait(false));
             }
         }
 
@@ -67,14 +67,14 @@ namespace k8s.Tests
             var ct = CancellationToken.None;
             using (var peekableStream = CreateStream("one\ntwo\nthree\n"))
             {
-                Assert.Equal("one\n", await peekableStream.PeekLineAsync(ct));
-                Assert.Equal("two\n", await peekableStream.PeekLineAsync(ct));
-                Assert.Equal("three\n", await peekableStream.PeekLineAsync(ct));
-                Assert.Null(await peekableStream.PeekLineAsync(ct));
-                Assert.Equal("one\n", await peekableStream.ReadLineAsync(ct));
-                Assert.Equal("two\n", await peekableStream.ReadLineAsync(ct));
-                Assert.Equal("three\n", await peekableStream.ReadLineAsync(ct));
-                Assert.Null(await peekableStream.ReadLineAsync(ct));
+                Assert.Equal("one\n", await peekableStream.PeekLineAsync(ct).ConfigureAwait(false));
+                Assert.Equal("two\n", await peekableStream.PeekLineAsync(ct).ConfigureAwait(false));
+                Assert.Equal("three\n", await peekableStream.PeekLineAsync(ct).ConfigureAwait(false));
+                Assert.Null(await peekableStream.PeekLineAsync(ct).ConfigureAwait(false));
+                Assert.Equal("one\n", await peekableStream.ReadLineAsync(ct).ConfigureAwait(false));
+                Assert.Equal("two\n", await peekableStream.ReadLineAsync(ct).ConfigureAwait(false));
+                Assert.Equal("three\n", await peekableStream.ReadLineAsync(ct).ConfigureAwait(false));
+                Assert.Null(await peekableStream.ReadLineAsync(ct).ConfigureAwait(false));
             }
         }
 
@@ -90,11 +90,11 @@ namespace k8s.Tests
             var ct = CancellationToken.None;
             using (var peekableStream = CreateStream(sb.ToString()))
             {
-                Assert.Equal("one\n", await peekableStream.ReadLineAsync(ct));
-                Assert.Equal("two\n", await peekableStream.ReadLineAsync(ct));
-                Assert.Equal(new String('9', 4500) + "\n", await peekableStream.ReadLineAsync(ct));
-                Assert.Equal("three\n", await peekableStream.ReadLineAsync(ct));
-                Assert.Equal(new String('6', 17432) + "\n", await peekableStream.ReadLineAsync(ct));
+                Assert.Equal("one\n", await peekableStream.ReadLineAsync(ct).ConfigureAwait(false));
+                Assert.Equal("two\n", await peekableStream.ReadLineAsync(ct).ConfigureAwait(false));
+                Assert.Equal(new string('9', 4500) + "\n", await peekableStream.ReadLineAsync(ct).ConfigureAwait(false));
+                Assert.Equal("three\n", await peekableStream.ReadLineAsync(ct).ConfigureAwait(false));
+                Assert.Equal(new string('6', 17432) + "\n", await peekableStream.ReadLineAsync(ct).ConfigureAwait(false));
             }
         }
 
@@ -104,11 +104,11 @@ namespace k8s.Tests
             var ct = CancellationToken.None;
             using (var peekableStream = CreateStream("one\ntwo\nthree"))
             {
-                Assert.Equal("one\n", await peekableStream.ReadLineAsync(ct));
-                Assert.Equal("two\n", await peekableStream.ReadLineAsync(ct));
-                Assert.Equal("three", await peekableStream.ReadLineAsync(ct));
-                Assert.Null(await peekableStream.ReadLineAsync(ct));
-                Assert.Null(await peekableStream.ReadLineAsync(ct));
+                Assert.Equal("one\n", await peekableStream.ReadLineAsync(ct).ConfigureAwait(false));
+                Assert.Equal("two\n", await peekableStream.ReadLineAsync(ct).ConfigureAwait(false));
+                Assert.Equal("three", await peekableStream.ReadLineAsync(ct).ConfigureAwait(false));
+                Assert.Null(await peekableStream.ReadLineAsync(ct).ConfigureAwait(false));
+                Assert.Null(await peekableStream.ReadLineAsync(ct).ConfigureAwait(false));
             }
         }
 
@@ -119,7 +119,7 @@ namespace k8s.Tests
             var s = new string('X', 32767) + "\n";
             using (var peekableStream = CreateStream(s, 32768))
             {
-                Assert.Equal(s, await peekableStream.ReadLineAsync(ct));
+                Assert.Equal(s, await peekableStream.ReadLineAsync(ct).ConfigureAwait(false));
             }
         }
 
@@ -130,7 +130,7 @@ namespace k8s.Tests
             using (var peekableStream = CreateStream(new string('6', 32769), 32768))
             {
                 Assert.ThrowsAsync<InvalidOperationException>(
-                    async () => await peekableStream.ReadLineAsync(ct));
+                    async () => await peekableStream.ReadLineAsync(ct).ConfigureAwait(false));
             }
         }
     }

@@ -6,7 +6,6 @@
 
 namespace k8s.Models
 {
-    using Microsoft.Rest;
     using Newtonsoft.Json;
     using System.Collections;
     using System.Collections.Generic;
@@ -28,13 +27,15 @@ namespace k8s.Models
         /// <summary>
         /// Initializes a new instance of the V1ProjectedVolumeSource class.
         /// </summary>
+        /// <param name="defaultMode">Mode bits used to set permissions on
+        /// created files by default. Must be an octal value between 0000 and
+        /// 0777 or a decimal value between 0 and 511. YAML accepts both octal
+        /// and decimal values, JSON requires decimal values for mode bits.
+        /// Directories within the path are not affected by this setting. This
+        /// might be in conflict with other options that affect the file mode,
+        /// like fsGroup, and the result can be other mode bits set.</param>
         /// <param name="sources">list of volume projections</param>
-        /// <param name="defaultMode">Mode bits to use on created files by
-        /// default. Must be a value between 0 and 0777. Directories within the
-        /// path are not affected by this setting. This might be in conflict
-        /// with other options that affect the file mode, like fsGroup, and the
-        /// result can be other mode bits set.</param>
-        public V1ProjectedVolumeSource(IList<V1VolumeProjection> sources, int? defaultMode = default(int?))
+        public V1ProjectedVolumeSource(int? defaultMode = default(int?), IList<V1VolumeProjection> sources = default(IList<V1VolumeProjection>))
         {
             DefaultMode = defaultMode;
             Sources = sources;
@@ -47,11 +48,13 @@ namespace k8s.Models
         partial void CustomInit();
 
         /// <summary>
-        /// Gets or sets mode bits to use on created files by default. Must be
-        /// a value between 0 and 0777. Directories within the path are not
-        /// affected by this setting. This might be in conflict with other
-        /// options that affect the file mode, like fsGroup, and the result can
-        /// be other mode bits set.
+        /// Gets or sets mode bits used to set permissions on created files by
+        /// default. Must be an octal value between 0000 and 0777 or a decimal
+        /// value between 0 and 511. YAML accepts both octal and decimal
+        /// values, JSON requires decimal values for mode bits. Directories
+        /// within the path are not affected by this setting. This might be in
+        /// conflict with other options that affect the file mode, like
+        /// fsGroup, and the result can be other mode bits set.
         /// </summary>
         [JsonProperty(PropertyName = "defaultMode")]
         public int? DefaultMode { get; set; }
@@ -62,28 +65,5 @@ namespace k8s.Models
         [JsonProperty(PropertyName = "sources")]
         public IList<V1VolumeProjection> Sources { get; set; }
 
-        /// <summary>
-        /// Validate the object.
-        /// </summary>
-        /// <exception cref="ValidationException">
-        /// Thrown if validation fails
-        /// </exception>
-        public virtual void Validate()
-        {
-            if (Sources == null)
-            {
-                throw new ValidationException(ValidationRules.CannotBeNull, "Sources");
-            }
-            if (Sources != null)
-            {
-                foreach (var element in Sources)
-                {
-                    if (element != null)
-                    {
-                        element.Validate();
-                    }
-                }
-            }
-        }
     }
 }

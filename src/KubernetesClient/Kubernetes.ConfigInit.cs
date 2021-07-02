@@ -4,6 +4,9 @@ using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Net.Security;
+using System.Net.Sockets;
+using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography.X509Certificates;
 using k8s.Exceptions;
 using k8s.Models;
@@ -22,7 +25,8 @@ namespace k8s
         /// <param name="httpClient">
         ///     The <see cref="HttpClient" /> to use for all requests.
         /// </param>
-        public Kubernetes(KubernetesClientConfiguration config, HttpClient httpClient) : this(config, httpClient, false)
+        public Kubernetes(KubernetesClientConfiguration config, HttpClient httpClient)
+            : this(config, httpClient, false)
         {
         }
 
@@ -38,18 +42,14 @@ namespace k8s
         /// <param name="disposeHttpClient">
         ///     Whether or not the <see cref="Kubernetes"/> object should own the lifetime of <paramref name="httpClient"/>.
         /// </param>
-        public Kubernetes(KubernetesClientConfiguration config, HttpClient httpClient, bool disposeHttpClient) : this(
+        public Kubernetes(KubernetesClientConfiguration config, HttpClient httpClient, bool disposeHttpClient)
+            : this(
             httpClient, disposeHttpClient)
         {
             ValidateConfig(config);
             CaCerts = config.SslCaCerts;
             SkipTlsVerify = config.SkipTlsVerify;
             SetCredentials(config);
-            if (config.HasCertificate())
-            {
-                var cert = CertUtils.GeneratePfx(config);
-                ClientCertificates = new X509Certificate2Collection { cert };
-            }
         }
 
         /// <summary>
@@ -65,9 +65,9 @@ namespace k8s
         {
             Initialize();
             ValidateConfig(config);
-            CreateHttpClient(handlers);
             CaCerts = config.SslCaCerts;
             SkipTlsVerify = config.SkipTlsVerify;
+            CreateHttpClient(handlers, config);
             InitializeFromConfig(config);
         }
 
@@ -99,19 +99,8 @@ namespace k8s
             {
                 if (config.SkipTlsVerify)
                 {
-#if NET452
-                    ((WebRequestHandler)HttpClientHandler).ServerCertificateValidationCallback =
-                        (sender, certificate, chain, sslPolicyErrors) => true;
-#elif XAMARINIOS1_0 || MONOANDROID8_1
-                    System.Net.ServicePointManager.ServerCertificateValidationCallback +=
- (sender, certificate, chain, sslPolicyErrors) =>
-                    {
-                        return true;
-                    };
-#else
                     HttpClientHandler.ServerCertificateCustomValidationCallback =
                         (sender, certificate, chain, sslPolicyErrors) => true;
-#endif
                 }
                 else
                 {
@@ -119,60 +108,19 @@ namespace k8s
                     {
                         throw new KubeConfigException("A CA must be set when SkipTlsVerify === false");
                     }
-#if NET452
-                    ((WebRequestHandler)HttpClientHandler).ServerCertificateValidationCallback =
- (sender, certificate, chain, sslPolicyErrors) =>
-                    {
-                        return Kubernetes.CertificateValidationCallBack(sender, CaCerts, certificate, chain, sslPolicyErrors);
-                    };
-#elif XAMARINIOS1_0
-                    System.Net.ServicePointManager.ServerCertificateValidationCallback +=
- (sender, certificate, chain, sslPolicyErrors) =>
-                    {
-                        var cert
- = new X509Certificate2(certificate);
-                        return Kubernetes.CertificateValidationCallBack(sender, CaCerts, cert, chain, sslPolicyErrors);
-                    };
-#elif MONOANDROID8_1
-                    var certList = new System.Collections.Generic.List<Java.Security.Cert.Certificate>();
 
-                    foreach (X509Certificate2 caCert in CaCerts)
-                    {
-                        using (var certStream
- = new System.IO.MemoryStream(caCert.RawData))
-                        {
-                            Java.Security.Cert.Certificate cert
- = Java.Security.Cert.CertificateFactory.GetInstance("X509").GenerateCertificate(certStream);
-
-                            certList.Add(cert);
-                        }
-                    }
-
-                    var handler
- = (Xamarin.Android.Net.AndroidClientHandler)this.HttpClientHandler;
-
-                    handler.TrustedCerts
- = certList;
-#else
                     HttpClientHandler.ServerCertificateCustomValidationCallback =
                         (sender, certificate, chain, sslPolicyErrors) =>
                         {
-                            return Kubernetes.CertificateValidationCallBack(sender, CaCerts, certificate, chain,
+                            return CertificateValidationCallBack(sender, CaCerts, certificate, chain,
                                 sslPolicyErrors);
                         };
-#endif
                 }
             }
 
             // set credentails for the kubernetes client
             SetCredentials(config);
             config.AddCertificates(HttpClientHandler);
-#if NET452
-            this.ClientCertificates = ((WebRequestHandler)HttpClientHandler).ClientCertificates;
-#else
-            this.ClientCertificates = HttpClientHandler.ClientCertificates;
-#endif
-
         }
 
         private X509Certificate2Collection CaCerts { get; }
@@ -182,21 +130,21 @@ namespace k8s
 
         partial void CustomInitialize()
         {
-#if NET452
-            ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12;
-#endif
             DeserializationSettings.Converters.Add(new V1Status.V1StatusObjectViewConverter());
+            SerializationSettings.DateFormatString = "yyyy'-'MM'-'dd'T'HH':'mm':'ss.ffffffK";
         }
 
         /// <summary>A <see cref="DelegatingHandler"/> that simply forwards a request with no further processing.</summary>
         private sealed class ForwardingHandler : DelegatingHandler
         {
-            public ForwardingHandler(HttpMessageHandler handler) : base(handler)
+            public ForwardingHandler(HttpMessageHandler handler)
+                : base(handler)
             {
             }
         }
 
-        private T AppendDelegatingHandler<T>() where T : DelegatingHandler, new()
+        private T AppendDelegatingHandler<T>()
+            where T : DelegatingHandler, new()
         {
             var cur = FirstMessageHandler as DelegatingHandler;
 
@@ -215,6 +163,7 @@ namespace k8s
 
                 cur = next;
             }
+
             throw new InvalidOperationException("Unable to append a delegating handler");
         }
 
@@ -222,9 +171,66 @@ namespace k8s
         // and it does insert the WatcherDelegatingHandler. we don't want the RetryDelegatingHandler because it has a very broad definition
         // of what requests have failed. it considers everything outside 2xx to be failed, including 1xx (e.g. 101 Switching Protocols) and
         // 3xx. in particular, this prevents upgraded connections and certain generic/custom requests from working.
-        private void CreateHttpClient(DelegatingHandler[] handlers)
+        private void CreateHttpClient(DelegatingHandler[] handlers, KubernetesClientConfiguration config)
         {
             FirstMessageHandler = HttpClientHandler = CreateRootHandler();
+
+
+#if NET5_0
+            // https://github.com/kubernetes-client/csharp/issues/587
+            // let user control if tcp keep alive until better fix
+            if (config.TcpKeepAlive)
+            {
+                // https://github.com/kubernetes-client/csharp/issues/533
+                // net5 only
+                // this is a temp fix to attach SocketsHttpHandler to HttpClient in order to set SO_KEEPALIVE
+                // https://tldp.org/HOWTO/html_single/TCP-Keepalive-HOWTO/
+                //
+                // _underlyingHandler is not a public accessible field
+                // src of net5 HttpClientHandler and _underlyingHandler field defined here
+                // https://github.com/dotnet/runtime/blob/79ae74f5ca5c8a6fe3a48935e85bd7374959c570/src/libraries/System.Net.Http/src/System/Net/Http/HttpClientHandler.cs#L22
+                //
+                // Should remove after better solution
+
+                var sh = new SocketsHttpHandler();
+                sh.ConnectCallback = async (context, token) =>
+                {
+                    var socket = new Socket(SocketType.Stream, ProtocolType.Tcp)
+                    {
+                        NoDelay = true,
+                    };
+
+                    socket.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.KeepAlive, true);
+
+                    var host = context.DnsEndPoint.Host;
+
+                    if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+                    {
+                        // https://github.com/dotnet/runtime/issues/24917
+                        // GetHostAddresses will return {host} if host is an ip
+                        var ips = Dns.GetHostAddresses(host);
+                        if (ips.Length == 0)
+                        {
+                            throw new Exception($"{host} DNS lookup failed");
+                        }
+
+                        host = ips[new Random().Next(ips.Length)].ToString();
+                    }
+
+                    await socket.ConnectAsync(host, context.DnsEndPoint.Port, token).ConfigureAwait(false);
+                    return new NetworkStream(socket, ownsSocket: true);
+                };
+
+
+                // set HttpClientHandler's cert callback before replace _underlyingHandler
+                // force HttpClientHandler use our callback
+                InitializeFromConfig(config);
+
+                var p = HttpClientHandler.GetType().GetField("_underlyingHandler", BindingFlags.NonPublic | BindingFlags.Instance);
+                p.SetValue(HttpClientHandler, (sh));
+            }
+#endif
+
             if (handlers == null || handlers.Length == 0)
             {
                 // ensure we have at least one DelegatingHandler so AppendDelegatingHandler will work
@@ -259,11 +265,11 @@ namespace k8s
         ///     SSl Cert Validation Callback
         /// </summary>
         /// <param name="sender">sender</param>
+        /// <param name="caCerts">client ca</param>
         /// <param name="certificate">client certificate</param>
         /// <param name="chain">chain</param>
         /// <param name="sslPolicyErrors">ssl policy errors</param>
         /// <returns>true if valid cert</returns>
-        [SuppressMessage("Microsoft.Usage", "CA1801:ReviewUnusedParameters", Justification = "Unused by design")]
         public static bool CertificateValidationCallBack(
             object sender,
             X509Certificate2Collection caCerts,
@@ -271,6 +277,16 @@ namespace k8s
             X509Chain chain,
             SslPolicyErrors sslPolicyErrors)
         {
+            if (caCerts == null)
+            {
+                throw new ArgumentNullException(nameof(caCerts));
+            }
+
+            if (chain == null)
+            {
+                throw new ArgumentNullException(nameof(chain));
+            }
+
             // If the certificate is a valid, signed certificate, return true.
             if (sslPolicyErrors == SslPolicyErrors.None)
             {
@@ -311,15 +327,18 @@ namespace k8s
             return false;
         }
 
-        /// <summary>Creates <see cref="ServiceClientCredentials"/> based on the given config, or returns null if no such credentials are
-        /// needed.
+        /// <summary>
+        /// Creates <see cref="ServiceClientCredentials"/> based on the given config, or returns null if no such credentials are needed.
         /// </summary>
+        /// <param name="config">kubenetes config object</param>
+        /// <returns>instance of <see cref="ServiceClientCredentials"/></returns>
         public static ServiceClientCredentials CreateCredentials(KubernetesClientConfiguration config)
         {
             if (config == null)
             {
                 throw new ArgumentNullException(nameof(config));
             }
+
             if (config.TokenProvider != null)
             {
                 return new TokenCredentials(config.TokenProvider);

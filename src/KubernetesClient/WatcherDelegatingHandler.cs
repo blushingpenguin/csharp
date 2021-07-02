@@ -8,11 +8,6 @@ using System.Threading.Tasks;
 
 namespace k8s
 {
-    public interface ILineSeparatedHttpContent
-    {
-        IAsyncLineReader StreamReader { get; }
-    }
-
     /// <summary>
     /// This HttpDelegatingHandler is to rewrite the response and return first line to autorest client
     /// then use WatchExt to create a watch object which interact with the replaced http response to get watch works.
@@ -21,15 +16,18 @@ namespace k8s
     {
         public HttpClient HttpClient { get; set; }
 
-        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request,
+        protected override async Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
             CancellationToken cancellationToken)
         {
+            request.Version = HttpVersion.Version20;
             var originResponse = await base.SendAsync(request, cancellationToken).ConfigureAwait(false);
 
-            if (originResponse.IsSuccessStatusCode && request.Method == HttpMethod.Get) // all watches are GETs, so we can ignore others
+            // all watches are GETs, so we can ignore others
+            if (originResponse.IsSuccessStatusCode && request.Method == HttpMethod.Get)
             {
-                string query = request.RequestUri.Query;
-                int index = query.IndexOf("watch=true");
+                var query = request.RequestUri.Query;
+                var index = query.IndexOf("watch=true", StringComparison.InvariantCulture);
                 if (index > 0 && (query[index - 1] == '&' || query[index - 1] == '?'))
                 {
                     originResponse.Content = new LineSeparatedHttpContent(originResponse.Content, HttpClient?.Timeout, cancellationToken);

@@ -9,12 +9,13 @@ namespace k8s.Tests.Mock
 {
     public class MockWebSocket : WebSocket
     {
-        private WebSocketCloseStatus? closeStatus = null;
+        private WebSocketCloseStatus? closeStatus;
         private string closeStatusDescription;
         private WebSocketState state;
         private string subProtocol;
         private ConcurrentQueue<MessageData> receiveBuffers = new ConcurrentQueue<MessageData>();
         private AsyncAutoResetEvent receiveEvent = new AsyncAutoResetEvent(false);
+        private bool disposedValue;
 
         public MockWebSocket(string subProtocol = null)
         {
@@ -26,29 +27,27 @@ namespace k8s.Tests.Mock
             this.state = state;
         }
 
-        public EventHandler<MessageDataEventArgs> MessageSent;
+        public EventHandler<MessageDataEventArgs> MessageSent { get; set; }
 
         public Task InvokeReceiveAsync(ArraySegment<byte> buffer, WebSocketMessageType messageType, bool endOfMessage)
         {
-            this.receiveBuffers.Enqueue(new MessageData()
+            receiveBuffers.Enqueue(new MessageData()
             {
                 Buffer = buffer,
                 MessageType = messageType,
                 EndOfMessage = endOfMessage,
             });
-            this.receiveEvent.Set();
+            receiveEvent.Set();
             return Task.CompletedTask;
         }
 
-        #region WebSocket overrides
+        public override WebSocketCloseStatus? CloseStatus => closeStatus;
 
-        public override WebSocketCloseStatus? CloseStatus => this.closeStatus;
+        public override string CloseStatusDescription => closeStatusDescription;
 
-        public override string CloseStatusDescription => this.closeStatusDescription;
+        public override WebSocketState State => state;
 
-        public override WebSocketState State => this.state;
-
-        public override string SubProtocol => this.subProtocol;
+        public override string SubProtocol => subProtocol;
 
         public override void Abort()
         {
@@ -59,14 +58,14 @@ namespace k8s.Tests.Mock
             CancellationToken cancellationToken)
         {
             this.closeStatus = closeStatus;
-            this.closeStatusDescription = statusDescription;
-            this.receiveBuffers.Enqueue(new MessageData()
+            closeStatusDescription = statusDescription;
+            receiveBuffers.Enqueue(new MessageData()
             {
                 Buffer = new ArraySegment<byte>(new byte[] { }),
                 EndOfMessage = true,
                 MessageType = WebSocketMessageType.Close,
             });
-            this.receiveEvent.Set();
+            receiveEvent.Set();
             return Task.CompletedTask;
         }
 
@@ -76,31 +75,26 @@ namespace k8s.Tests.Mock
             throw new NotImplementedException();
         }
 
-        public override void Dispose()
-        {
-            this.receiveBuffers.Clear();
-            this.receiveEvent.Set();
-        }
-
-        public override async Task<WebSocketReceiveResult> ReceiveAsync(ArraySegment<byte> buffer,
+        public override async Task<WebSocketReceiveResult> ReceiveAsync(
+            ArraySegment<byte> buffer,
             CancellationToken cancellationToken)
         {
-            if (this.receiveBuffers.Count == 0)
+            if (receiveBuffers.IsEmpty)
             {
-                await this.receiveEvent.WaitAsync(cancellationToken).ConfigureAwait(false);
+                await receiveEvent.WaitAsync(cancellationToken).ConfigureAwait(false);
             }
 
-            int bytesReceived = 0;
-            bool endOfMessage = true;
-            WebSocketMessageType messageType = WebSocketMessageType.Close;
+            var bytesReceived = 0;
+            var endOfMessage = true;
+            var messageType = WebSocketMessageType.Close;
 
             MessageData received = null;
-            if (this.receiveBuffers.TryPeek(out received))
+            if (receiveBuffers.TryPeek(out received))
             {
                 messageType = received.MessageType;
                 if (received.Buffer.Count <= buffer.Count)
                 {
-                    this.receiveBuffers.TryDequeue(out received);
+                    receiveBuffers.TryDequeue(out received);
                     received.Buffer.CopyTo(buffer);
                     bytesReceived = received.Buffer.Count;
                     endOfMessage = received.EndOfMessage;
@@ -120,20 +114,19 @@ namespace k8s.Tests.Mock
         public override Task SendAsync(ArraySegment<byte> buffer, WebSocketMessageType messageType, bool endOfMessage,
             CancellationToken cancellationToken)
         {
-            this.MessageSent?.Invoke(this,
+            MessageSent?.Invoke(
+                this,
                 new MessageDataEventArgs()
                 {
                     Data = new MessageData()
                     {
                         Buffer = buffer,
                         MessageType = messageType,
-                        EndOfMessage = endOfMessage
+                        EndOfMessage = endOfMessage,
                     },
                 });
             return Task.CompletedTask;
         }
-
-        #endregion
 
         public class MessageData
         {
@@ -145,6 +138,34 @@ namespace k8s.Tests.Mock
         public class MessageDataEventArgs : EventArgs
         {
             public MessageData Data { get; set; }
+        }
+
+        protected virtual void Dispose(bool disposing)
+        {
+            if (!disposedValue)
+            {
+                if (disposing)
+                {
+                    receiveBuffers.Clear();
+                    receiveEvent.Set();
+                }
+
+                disposedValue = true;
+            }
+        }
+
+        // // TODO: override finalizer only if 'Dispose(bool disposing)' has code to free unmanaged resources
+        // ~MockWebSocket()
+        // {
+        //     // Do not change this code. Put cleanup code in 'Dispose(bool disposing)' method
+        //     Dispose(disposing: false);
+        // }
+
+        public override void Dispose()
+        {
+            // Do not change this code. Put cleanup code in 'Dispose(bool disposing)' method
+            Dispose(true);
+            GC.SuppressFinalize(this);
         }
     }
 }

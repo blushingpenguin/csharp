@@ -19,7 +19,7 @@ namespace k8s.Models
     /// information by which namespace it exists in.  RoleBindings in a given
     /// namespace only have effect in that namespace. Deprecated in v1.17 in
     /// favor of rbac.authorization.k8s.io/v1 RoleBinding, and will no longer
-    /// be served in v1.20.
+    /// be served in v1.22.
     /// </summary>
     public partial class V1alpha1RoleBinding
     {
@@ -50,7 +50,7 @@ namespace k8s.Models
         /// <param name="metadata">Standard object's metadata.</param>
         /// <param name="subjects">Subjects holds references to the objects the
         /// role applies to.</param>
-        public V1alpha1RoleBinding(V1alpha1RoleRef roleRef, string apiVersion = default(string), string kind = default(string), V1ObjectMeta metadata = default(V1ObjectMeta), IList<Rbacv1alpha1Subject> subjects = default(IList<Rbacv1alpha1Subject>))
+        public V1alpha1RoleBinding(V1alpha1RoleRef roleRef, string apiVersion = default(string), string kind = default(string), V1ObjectMeta metadata = default(V1ObjectMeta), IList<V1alpha1Subject> subjects = default(IList<V1alpha1Subject>))
         {
             ApiVersion = apiVersion;
             Kind = kind;
@@ -104,7 +104,7 @@ namespace k8s.Models
         /// applies to.
         /// </summary>
         [JsonProperty(PropertyName = "subjects")]
-        public IList<Rbacv1alpha1Subject> Subjects { get; set; }
+        public IList<V1alpha1Subject> Subjects { get; set; }
 
         /// <summary>
         /// Validate the object.

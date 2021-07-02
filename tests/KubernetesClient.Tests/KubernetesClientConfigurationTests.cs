@@ -1,10 +1,14 @@
+using k8s.Authentication;
+using k8s.Exceptions;
+using k8s.KubeConfigModels;
 using System;
+using System.Collections.Generic;
 using System.IO;
+using System.IO.Abstractions.TestingHelpers;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Threading;
-using k8s.Exceptions;
-using k8s.KubeConfigModels;
+using System.Threading.Tasks;
 using Xunit;
 
 namespace k8s.Tests
@@ -161,8 +165,9 @@ namespace k8s.Tests
         public void CreatedFromPreLoadedConfig()
         {
             var k8sConfig =
-                KubernetesClientConfiguration.LoadKubeConfig(new FileInfo("assets/kubeconfig.yml"),
-                    useRelativePaths: false);
+                KubernetesClientConfiguration.LoadKubeConfig(
+                    new FileInfo("assets/kubeconfig.yml"),
+                    false);
             var cfg = KubernetesClientConfiguration.BuildConfigFromConfigObject(k8sConfig);
             Assert.NotNull(cfg.Host);
         }
@@ -173,7 +178,8 @@ namespace k8s.Tests
         [Fact]
         public void DefaultConfigurationLoaded()
         {
-            var cfg = KubernetesClientConfiguration.BuildConfigFromConfigFile(new FileInfo("assets/kubeconfig.yml"),
+            var cfg = KubernetesClientConfiguration.BuildConfigFromConfigFile(
+                new FileInfo("assets/kubeconfig.yml"),
                 useRelativePaths: false);
             Assert.NotNull(cfg.Host);
         }
@@ -240,6 +246,18 @@ namespace k8s.Tests
             var cfg = KubernetesClientConfiguration.BuildConfigFromConfigFile(fi, useRelativePaths: false);
             Assert.Equal("admin", cfg.Username);
             Assert.Equal("secret", cfg.Password);
+        }
+
+        /// <summary>
+        ///     Checks oidc authentication provider information is read properly
+        /// </summary>
+        [Fact]
+        public void UserOidcAuthentication()
+        {
+            var fi = new FileInfo("assets/kubeconfig.user-oidc.yml");
+            var cfg = KubernetesClientConfiguration.BuildConfigFromConfigFile(fi, useRelativePaths: false);
+            Assert.Equal("ID_TOKEN", cfg.AccessToken);
+            Assert.IsType<OidcTokenProvider>(cfg.TokenProvider);
         }
 
         /// <summary>
@@ -339,7 +357,7 @@ namespace k8s.Tests
         {
             var filePath = "assets/kubeconfig.yml";
             var cfg = KubernetesClientConfiguration.BuildConfigFromConfigFile(filePath, null, null,
-                useRelativePaths: false);
+                false);
             Assert.NotNull(cfg.Host);
         }
 
@@ -366,8 +384,43 @@ namespace k8s.Tests
             var filePath = "assets/kubeconfig.as-user-extra.yml";
 
             var cfg = KubernetesClientConfiguration.BuildConfigFromConfigFile(filePath, null, null,
-                useRelativePaths: false);
+                false);
             Assert.NotNull(cfg.Host);
+        }
+
+        [Fact]
+        public async Task ContextWithClusterExtensions()
+        {
+            var path = Path.GetFullPath("assets/kubeconfig.cluster-extensions.yml");
+
+            var cfg = await KubernetesClientConfiguration.BuildConfigFromConfigFileAsync(new FileInfo(path)).ConfigureAwait(false);
+        }
+
+        [Fact]
+        public void ContextWithWildcardIPv4()
+        {
+            var path = Path.GetFullPath("assets/kubeconfig.wildcard-ipv4.yml");
+
+            var cfg = KubernetesClientConfiguration.BuildConfigFromConfigFile(path);
+            Assert.Equal("https://127.0.0.1:443/", cfg.Host);
+        }
+
+        [Fact]
+        public void ContextWithWildcardIPv6()
+        {
+            var path = Path.GetFullPath("assets/kubeconfig.wildcard-ipv6.yml");
+
+            var cfg = KubernetesClientConfiguration.BuildConfigFromConfigFile(path);
+            Assert.Equal("https://[::1]:443/", cfg.Host);
+        }
+
+        [Fact]
+        public void ContextWithWildcardIPv62()
+        {
+            var path = Path.GetFullPath("assets/kubeconfig.wildcard-ipv6.yml");
+
+            var cfg = KubernetesClientConfiguration.BuildConfigFromConfigFile(path);
+            Assert.Equal("https://[::1]:443/", cfg.Host);
         }
 
         /// <summary>
@@ -434,7 +487,7 @@ namespace k8s.Tests
         }
 
         [Fact]
-        public void LoadKubeConfigFromEnvironmentVariable_MultipleConfigs()
+        public void LoadKubeConfigFromEnvironmentVariableMultipleConfigs()
         {
             // This test makes sure that a list of environment variables works (no exceptions),
             // doesn't check validity of configuration, which is done in other tests.
@@ -442,7 +495,8 @@ namespace k8s.Tests
             var filePath = Path.GetFullPath("assets/kubeconfig.relative.yml");
             var environmentVariable = "KUBECONFIG_LoadKubeConfigFromEnvironmentVariable_MultipleConfigs";
 
-            Environment.SetEnvironmentVariable(environmentVariable,
+            Environment.SetEnvironmentVariable(
+                environmentVariable,
                 string.Concat(filePath, RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? ';' : ':', filePath));
             KubernetesClientConfiguration.KubeConfigEnvironmentVariable = environmentVariable;
 
@@ -458,6 +512,19 @@ namespace k8s.Tests
             var expectedCfg = Yaml.LoadFromString<K8SConfiguration>(txt);
 
             var fileInfo = new FileInfo(Path.GetFullPath("assets/kubeconfig.yml"));
+
+            var cfg = KubernetesClientConfiguration.LoadKubeConfig(new FileInfo[] { fileInfo, fileInfo });
+
+            AssertConfigEqual(expectedCfg, cfg);
+        }
+
+        [Fact]
+        public void LoadKubeConfigWithAdditionalProperties()
+        {
+            var txt = File.ReadAllText("assets/kubeconfig.additional-properties.yml");
+            var expectedCfg = Yaml.LoadFromString<K8SConfiguration>(txt);
+
+            var fileInfo = new FileInfo(Path.GetFullPath("assets/kubeconfig.additional-properties.yml"));
 
             var cfg = KubernetesClientConfiguration.LoadKubeConfig(new FileInfo[] { fileInfo, fileInfo });
 
@@ -522,8 +589,8 @@ namespace k8s.Tests
                 new FileInfo(path), new FileInfo(path),
             });
 
-            Assert.Equal(1, cfg.Extensions.Count);
-            Assert.Equal(1, cfg.Preferences.Count);
+            Assert.Single(cfg.Extensions);
+            Assert.Single(cfg.Preferences);
         }
 
         /// <summary>
@@ -564,7 +631,7 @@ namespace k8s.Tests
             }
         }
 
-        private void AssertContextEqual(Context expected, Context actual)
+        private static void AssertContextEqual(Context expected, Context actual)
         {
             Assert.Equal(expected.Name, actual.Name);
             Assert.Equal(expected.ContextDetails.Cluster, actual.ContextDetails.Cluster);
@@ -572,17 +639,18 @@ namespace k8s.Tests
             Assert.Equal(expected.ContextDetails.Namespace, actual.ContextDetails.Namespace);
         }
 
-        private void AssertClusterEqual(Cluster expected, Cluster actual)
+        private static void AssertClusterEqual(Cluster expected, Cluster actual)
         {
             Assert.Equal(expected.Name, actual.Name);
             Assert.Equal(expected.ClusterEndpoint.CertificateAuthority, actual.ClusterEndpoint.CertificateAuthority);
-            Assert.Equal(expected.ClusterEndpoint.CertificateAuthorityData,
+            Assert.Equal(
+                expected.ClusterEndpoint.CertificateAuthorityData,
                 actual.ClusterEndpoint.CertificateAuthorityData);
             Assert.Equal(expected.ClusterEndpoint.Server, actual.ClusterEndpoint.Server);
             Assert.Equal(expected.ClusterEndpoint.SkipTlsVerify, actual.ClusterEndpoint.SkipTlsVerify);
         }
 
-        private void AssertUserEqual(User expected, User actual)
+        private static void AssertUserEqual(User expected, User actual)
         {
             Assert.Equal(expected.Name, actual.Name);
 
@@ -604,6 +672,75 @@ namespace k8s.Tests
             if (expectedCreds.AuthProvider != null)
             {
                 Assert.True(expectedCreds.AuthProvider.Config.All(x => actualCreds.AuthProvider.Config.Contains(x)));
+            }
+        }
+
+        /// <summary>
+        ///    Test in cluster configuration.
+        /// </summary>
+        [Fact]
+        public void IsInCluster()
+        {
+            Assert.False(KubernetesClientConfiguration.IsInCluster());
+
+            var tokenPath = Path.Combine(KubernetesClientConfiguration.ServiceAccountPath, KubernetesClientConfiguration.ServiceAccountTokenKeyFileName);
+            var certPath = Path.Combine(KubernetesClientConfiguration.ServiceAccountPath, KubernetesClientConfiguration.ServiceAccountRootCAKeyFileName);
+
+            var fileSystem = new MockFileSystem(new Dictionary<string, MockFileData>
+            {
+                { tokenPath, new MockFileData("foo") },
+                { certPath, new MockFileData("bar") },
+            });
+            using (new FileUtils.InjectedFileSystem(fileSystem))
+            {
+                Assert.True(KubernetesClientConfiguration.IsInCluster());
+            }
+        }
+
+        /// <summary>
+        ///    Test in cluster configuration loading.
+        /// </summary>
+        [Fact]
+        public void LoadInCluster()
+        {
+            var tokenPath = Path.Combine(KubernetesClientConfiguration.ServiceAccountPath, KubernetesClientConfiguration.ServiceAccountTokenKeyFileName);
+            var certPath = Path.Combine(KubernetesClientConfiguration.ServiceAccountPath, KubernetesClientConfiguration.ServiceAccountRootCAKeyFileName);
+
+            var fileSystem = new MockFileSystem(new Dictionary<string, MockFileData>
+            {
+                { tokenPath, new MockFileData("foo") },
+                { certPath, new MockFileData("bar") },
+            });
+
+            using (new FileUtils.InjectedFileSystem(fileSystem))
+            {
+                var config = KubernetesClientConfiguration.InClusterConfig();
+                Assert.Equal("https://kubernetes.default.svc:443/", config.Host);
+                Assert.Null(config.Namespace);
+            }
+        }
+
+        /// <summary>
+        ///    Test in cluster configuration loading of namespaces.
+        /// </summary>
+        [Fact]
+        public void LoadInClusterNamespace()
+        {
+            var tokenPath = Path.Combine(KubernetesClientConfiguration.ServiceAccountPath, KubernetesClientConfiguration.ServiceAccountTokenKeyFileName);
+            var certPath = Path.Combine(KubernetesClientConfiguration.ServiceAccountPath, KubernetesClientConfiguration.ServiceAccountRootCAKeyFileName);
+            var namespacePath = Path.Combine(KubernetesClientConfiguration.ServiceAccountPath, KubernetesClientConfiguration.ServiceAccountNamespaceFileName);
+            var fileSystem = new MockFileSystem(new Dictionary<string, MockFileData>
+            {
+                { tokenPath, new MockFileData("foo") },
+                { certPath, new MockFileData("bar") },
+                { namespacePath, new MockFileData("some namespace") },
+            });
+
+            using (new FileUtils.InjectedFileSystem(fileSystem))
+            {
+                var config = KubernetesClientConfiguration.InClusterConfig();
+                Assert.Equal("https://kubernetes.default.svc:443/", config.Host);
+                Assert.Equal("some namespace", config.Namespace);
             }
         }
     }

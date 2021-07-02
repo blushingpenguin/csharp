@@ -11,33 +11,6 @@ using YamlDotNet.Serialization;
 
 namespace k8s.Models
 {
-    internal class QuantityConverter : JsonConverter
-    {
-        public override void WriteJson(JsonWriter writer, object value, JsonSerializer serializer)
-        {
-            var q = (ResourceQuantity)value;
-
-            if (q != null)
-            {
-                serializer.Serialize(writer, q.ToString());
-                return;
-            }
-
-            serializer.Serialize(writer, value);
-        }
-
-        public override object ReadJson(JsonReader reader, Type objectType, object existingValue,
-            JsonSerializer serializer)
-        {
-            return new ResourceQuantity(serializer.Deserialize<string>(reader));
-        }
-
-        public override bool CanConvert(Type objectType)
-        {
-            return objectType == typeof(string);
-        }
-    }
-
     /// <summary>
     ///     port https://github.com/kubernetes/apimachinery/blob/master/pkg/api/resource/quantity.go to c#
     ///     Quantity is a fixed-point representation of a number.
@@ -92,8 +65,19 @@ namespace k8s.Models
     {
         public enum SuffixFormat
         {
+            /// <summary>
+            /// e.g., 12e6
+            /// </summary>
             DecimalExponent,
+
+            /// <summary>
+            /// e.g., 12Mi (12 * 2^20)
+            /// </summary>
             BinarySI,
+
+            /// <summary>
+            /// e.g., 12M  (12 * 10^6)
+            /// </summary>
             DecimalSI,
         }
 
@@ -122,7 +106,7 @@ namespace k8s.Models
 
         protected bool Equals(ResourceQuantity other)
         {
-            return Format == other.Format && _unitlessValue.Equals(other._unitlessValue);
+            return Format == other?.Format && _unitlessValue.Equals(other._unitlessValue);
         }
 
         public override bool Equals(object obj)
@@ -166,7 +150,7 @@ namespace k8s.Models
         {
             if (suffixFormat == SuffixFormat.BinarySI)
             {
-                if (-1024 < _unitlessValue && _unitlessValue < 1024)
+                if (_unitlessValue > -1024 && _unitlessValue < 1024)
                 {
                     return Suffixer.AppendMaxSuffix(_unitlessValue, SuffixFormat.DecimalSI);
                 }
@@ -229,7 +213,7 @@ namespace k8s.Models
                 throw new ArgumentOutOfRangeException(nameof(expectedType));
             }
 
-            if (parser.Current is Scalar)
+            if (parser?.Current is Scalar)
             {
                 Value = ((Scalar)parser.Current).Value;
                 parser.MoveNext();
@@ -240,20 +224,13 @@ namespace k8s.Models
         /// <inheritdoc/>
         public void Write(IEmitter emitter, ObjectSerializer nestedObjectSerializer)
         {
-            emitter.Emit(new Scalar(this.ToString()));
-        }
-
-        public static implicit operator decimal(ResourceQuantity v)
-        {
-            return v._unitlessValue.ToDecimal();
+            emitter?.Emit(new Scalar(ToString()));
         }
 
         public static implicit operator ResourceQuantity(decimal v)
         {
             return new ResourceQuantity(v, 0, SuffixFormat.DecimalExponent);
         }
-
-        #region suffixer
 
         private class Suffixer
         {
@@ -262,28 +239,28 @@ namespace k8s.Models
                 {
                     // Don't emit an error when trying to produce
                     // a suffix for 2^0.
-                    {"", (2, 0) },
-                    {"Ki", (2, 10) },
-                    {"Mi", (2, 20) },
-                    {"Gi", (2, 30) },
-                    {"Ti", (2, 40) },
-                    {"Pi", (2, 50) },
-                    {"Ei", (2, 60) },
+                    { "", (2, 0) },
+                    { "Ki", (2, 10) },
+                    { "Mi", (2, 20) },
+                    { "Gi", (2, 30) },
+                    { "Ti", (2, 40) },
+                    { "Pi", (2, 50) },
+                    { "Ei", (2, 60) },
                 };
 
             private static readonly IReadOnlyDictionary<string, (int, int)> DecSuffixes =
                 new Dictionary<string, (int, int)>
                 {
-                    {"n", (10, -9) },
-                    {"u", (10, -6) },
-                    {"m", (10, -3) },
-                    {"", (10, 0) },
-                    {"k", (10, 3) },
-                    {"M", (10, 6) },
-                    {"G", (10, 9) },
-                    {"T", (10, 12) },
-                    {"P", (10, 15) },
-                    {"E", (10, 18) },
+                    { "n", (10, -9) },
+                    { "u", (10, -6) },
+                    { "m", (10, -3) },
+                    { "", (10, 0) },
+                    { "k", (10, 3) },
+                    { "M", (10, 6) },
+                    { "G", (10, 9) },
+                    { "T", (10, 12) },
+                    { "P", (10, 15) },
+                    { "E", (10, 18) },
                 };
 
             public Suffixer(string suffix)
@@ -325,7 +302,6 @@ namespace k8s.Models
             public int Base { get; }
             public int Exponent { get; }
 
-
             public static string AppendMaxSuffix(Fraction value, SuffixFormat format)
             {
                 if (value.IsZero)
@@ -351,7 +327,6 @@ namespace k8s.Models
                                 minE = exp;
                                 lastv = v;
                             }
-
 
                             if (minE == 0)
                             {
@@ -403,6 +378,39 @@ namespace k8s.Models
             }
         }
 
-        #endregion
+        public int ToInt32()
+        {
+            return _unitlessValue.ToInt32();
+        }
+
+        public long ToInt64()
+        {
+            return _unitlessValue.ToInt64();
+        }
+
+        public uint ToUInt32()
+        {
+            return _unitlessValue.ToUInt32();
+        }
+
+        public ulong ToUInt64()
+        {
+            return _unitlessValue.ToUInt64();
+        }
+
+        public BigInteger ToBigInteger()
+        {
+            return _unitlessValue.ToBigInteger();
+        }
+
+        public decimal ToDecimal()
+        {
+            return _unitlessValue.ToDecimal();
+        }
+
+        public double ToDouble()
+        {
+            return _unitlessValue.ToDouble();
+        }
     }
 }

@@ -87,7 +87,7 @@ namespace k8s.Models
         /// https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle#container-probes</param>
         /// <param name="resources">Compute Resources required by this
         /// container. Cannot be updated. More info:
-        /// https://kubernetes.io/docs/concepts/configuration/manage-compute-resources-container/</param>
+        /// https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/</param>
         /// <param name="securityContext">Security options the pod should run
         /// with. More info:
         /// https://kubernetes.io/docs/concepts/policy/security-context/ More
@@ -100,8 +100,7 @@ namespace k8s.Models
         /// This can be used to provide different probe parameters at the
         /// beginning of a Pod's lifecycle, when it might take a long time to
         /// load data or warm a cache, than during steady-state operation. This
-        /// cannot be updated. This is a beta feature enabled by the
-        /// StartupProbe feature flag. More info:
+        /// cannot be updated. More info:
         /// https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle#container-probes</param>
         /// <param name="stdin">Whether this container should allocate a buffer
         /// for stdin in the container runtime. If this is not set, reads from
@@ -287,7 +286,7 @@ namespace k8s.Models
         /// <summary>
         /// Gets or sets compute Resources required by this container. Cannot
         /// be updated. More info:
-        /// https://kubernetes.io/docs/concepts/configuration/manage-compute-resources-container/
+        /// https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
         /// </summary>
         [JsonProperty(PropertyName = "resources")]
         public V1ResourceRequirements Resources { get; set; }
@@ -309,7 +308,6 @@ namespace k8s.Models
         /// provide different probe parameters at the beginning of a Pod's
         /// lifecycle, when it might take a long time to load data or warm a
         /// cache, than during steady-state operation. This cannot be updated.
-        /// This is a beta feature enabled by the StartupProbe feature flag.
         /// More info:
         /// https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle#container-probes
         /// </summary>
@@ -434,6 +432,10 @@ namespace k8s.Models
             if (ReadinessProbe != null)
             {
                 ReadinessProbe.Validate();
+            }
+            if (SecurityContext != null)
+            {
+                SecurityContext.Validate();
             }
             if (StartupProbe != null)
             {

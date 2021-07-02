@@ -17,15 +17,15 @@ namespace k8s
             int? limit = null, bool? pretty = null, int? timeoutSeconds = null, string resourceVersion = null,
             Dictionary<string, List<string>> customHeaders = null, Action<WatchEventType, T> onEvent = null,
             Action<Exception> onError = null, Action onClosed = null,
-            CancellationToken cancellationToken = default(CancellationToken))
+            CancellationToken cancellationToken = default)
         {
             // Tracing
-            bool _shouldTrace = ServiceClientTracing.IsEnabled;
-            string _invocationId = null;
-            if (_shouldTrace)
+            var shouldTrace = ServiceClientTracing.IsEnabled;
+            string invocationId = null;
+            if (shouldTrace)
             {
-                _invocationId = ServiceClientTracing.NextInvocationId.ToString();
-                Dictionary<string, object> tracingParameters = new Dictionary<string, object>();
+                invocationId = ServiceClientTracing.NextInvocationId.ToString();
+                var tracingParameters = new Dictionary<string, object>();
                 tracingParameters.Add("path", path);
                 tracingParameters.Add("continue", @continue);
                 tracingParameters.Add("fieldSelector", fieldSelector);
@@ -35,12 +35,12 @@ namespace k8s
                 tracingParameters.Add("pretty", pretty);
                 tracingParameters.Add("timeoutSeconds", timeoutSeconds);
                 tracingParameters.Add("resourceVersion", resourceVersion);
-                ServiceClientTracing.Enter(_invocationId, this, nameof(WatchObjectAsync), tracingParameters);
+                ServiceClientTracing.Enter(invocationId, this, nameof(WatchObjectAsync), tracingParameters);
             }
 
             // Construct URL
-            var uriBuilder = new UriBuilder(this.BaseUri);
-            if (!uriBuilder.Path.EndsWith("/"))
+            var uriBuilder = new UriBuilder(BaseUri);
+            if (!uriBuilder.Path.EndsWith("/", StringComparison.InvariantCulture))
             {
                 uriBuilder.Path += "/";
             }
@@ -95,17 +95,18 @@ namespace k8s
             uriBuilder.Query =
                 query.Length == 0
                     ? ""
-                    : query.ToString(1,
+                    : query.ToString(
+                        1,
                         query.Length - 1); // UriBuilder.Query doesn't like leading '?' chars, so trim it
 
             // Create HTTP transport objects
             var httpRequest = new HttpRequestMessage(HttpMethod.Get, uriBuilder.ToString());
 
             // Set Credentials
-            if (this.Credentials != null)
+            if (Credentials != null)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                await this.Credentials.ProcessHttpRequestAsync(httpRequest, cancellationToken).ConfigureAwait(false);
+                await Credentials.ProcessHttpRequestAsync(httpRequest, cancellationToken).ConfigureAwait(false);
             }
 
             // Set Headers
@@ -123,9 +124,9 @@ namespace k8s
             }
 
             // Send Request
-            if (_shouldTrace)
+            if (shouldTrace)
             {
-                ServiceClientTracing.SendRequest(_invocationId, httpRequest);
+                ServiceClientTracing.SendRequest(invocationId, httpRequest);
             }
 
             cancellationToken.ThrowIfCancellationRequested();
@@ -133,22 +134,27 @@ namespace k8s
                 .SendAsync(httpRequest, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
                 .ConfigureAwait(false);
 
-            if (_shouldTrace)
+            if (shouldTrace)
             {
-                ServiceClientTracing.ReceiveResponse(_invocationId, httpResponse);
+                ServiceClientTracing.ReceiveResponse(invocationId, httpResponse);
             }
 
             cancellationToken.ThrowIfCancellationRequested();
 
             if (httpResponse.StatusCode != HttpStatusCode.OK)
             {
-                string responseContent = string.Empty;
+                var responseContent = string.Empty;
 
-                var ex = new HttpOperationException(string.Format("Operation returned an invalid status code '{0}'",
+                var ex = new HttpOperationException(string.Format(
+                    "Operation returned an invalid status code '{0}'",
                     httpResponse.StatusCode));
                 if (httpResponse.Content != null)
                 {
+#if NET5_0
+                    responseContent = await httpResponse.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+#else
                     responseContent = await httpResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
+#endif
                 }
 
                 ex.Request = new HttpRequestMessageWrapper(httpRequest, responseContent);
@@ -159,7 +165,8 @@ namespace k8s
                 throw ex;
             }
 
-            return new Watcher<T>(async () =>
+            return new Watcher<T>(
+                async () =>
             {
                 var stream = await httpResponse.Content.ReadAsStreamAsync().ConfigureAwait(false);
                 PeekableStreamReader reader = new PeekableStreamReader(stream, timeout: HttpClient.Timeout);

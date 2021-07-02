@@ -13,6 +13,7 @@ namespace k8s
         /// Read a line from the server
         /// </summary>
         /// <param name="cancellationToken">A token that can be used to cancel the read</param>
+        /// <return>The line, or null for end of stream</return>
         Task<string> ReadLineAsync(CancellationToken cancellationToken);
     }
 }

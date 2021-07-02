@@ -17,7 +17,7 @@ namespace k8s
         }
 
         /// <summary>
-        /// Initializes a ne winstance of the <see cref="KubernetesException"/> class using
+        /// Initializes a new instance of the <see cref="KubernetesException"/> class using
         /// the data from a <see cref="V1Status"/> object.
         /// </summary>
         /// <param name="status">
@@ -26,7 +26,25 @@ namespace k8s
         public KubernetesException(V1Status status)
             : this(status?.Message)
         {
-            this.Status = status;
+            Status = status;
+        }
+
+        /// <summary>
+        /// Initializes a new instance of the <see cref="KubernetesException"/> class using
+        /// the data from a <see cref="V1Status"/> object and a reference to the inner exception
+        /// that is the cause of this exception..
+        /// </summary>
+        /// <param name="status">
+        /// A status message which triggered this exception to be thrown.
+        /// </param>
+        /// <param name="innerException">
+        /// The exception that is the cause of the current exception, or <see langword="null"/>
+        /// if no inner exception is specified.
+        /// </param>
+        public KubernetesException(V1Status status, Exception innerException)
+            : this(status?.Message, innerException)
+        {
+            Status = status;
         }
 
         /// <summary>

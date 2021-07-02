@@ -1,22 +1,21 @@
 using System.Collections.Generic;
 using System.Linq;
-using k8s.Models;
 using Microsoft.Rest;
 using Newtonsoft.Json;
 
 namespace k8s.Models
 {
-    public class KubernetesList<T> : IMetadata<V1ListMeta>, IItems<T> where T : IKubernetesObject
+    public class KubernetesList<T> : IMetadata<V1ListMeta>, IItems<T>
+        where T : IKubernetesObject
     {
-        public KubernetesList(IList<T> items, string apiVersion = default(string), string kind = default(string),
-            V1ListMeta metadata = default(V1ListMeta))
+        public KubernetesList(IList<T> items, string apiVersion = default, string kind = default,
+            V1ListMeta metadata = default)
         {
             ApiVersion = apiVersion;
             Items = items;
             Kind = kind;
             Metadata = metadata;
         }
-
 
         /// <summary>
         /// Gets or sets aPIVersion defines the versioned schema of this
@@ -28,7 +27,8 @@ namespace k8s.Models
         [JsonProperty(PropertyName = "apiVersion")]
         public string ApiVersion { get; set; }
 
-        [JsonProperty(PropertyName = "items")] public IList<T> Items { get; set; }
+        [JsonProperty(PropertyName = "items")]
+        public IList<T> Items { get; set; }
 
         /// <summary>
         /// Gets or sets kind is a string value representing the REST resource

@@ -10,7 +10,7 @@ using System.Threading.Tasks;
 using k8s.Authentication;
 using k8s.Exceptions;
 using k8s.KubeConfigModels;
-
+using System.Net;
 
 namespace k8s
 {
@@ -19,7 +19,7 @@ namespace k8s
         /// <summary>
         ///     kubeconfig Default Location
         /// </summary>
-        private static readonly string KubeConfigDefaultLocation =
+        public static readonly string KubeConfigDefaultLocation =
             RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
                 ? Path.Combine(Environment.GetEnvironmentVariable("USERPROFILE"), @".kube\config")
                 : Path.Combine(Environment.GetEnvironmentVariable("HOME"), ".kube/config");
@@ -41,22 +41,23 @@ namespace k8s
         /// </summary>
         /// <remarks>
         ///     If multiple kubeconfig files are specified in the KUBECONFIG environment variable,
-        ///     merges the files, where first occurence wins. See https://kubernetes.io/docs/concepts/configuration/organize-cluster-access-kubeconfig/#merging-kubeconfig-files.
+        ///     merges the files, where first occurrence wins. See https://kubernetes.io/docs/concepts/configuration/organize-cluster-access-kubeconfig/#merging-kubeconfig-files.
         /// </remarks>
+        /// <returns>Instance of the<see cref="KubernetesClientConfiguration"/> class</returns>
         public static KubernetesClientConfiguration BuildDefaultConfig()
         {
             var kubeconfig = Environment.GetEnvironmentVariable(KubeConfigEnvironmentVariable);
             if (kubeconfig != null)
             {
                 var configList = kubeconfig.Split(RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? ';' : ':')
-                    .Select((s) => new FileInfo(s));
+                    .Select((s) => new FileInfo(s.Trim('"')));
                 var k8sConfig = LoadKubeConfig(configList.ToArray());
                 return BuildConfigFromConfigObject(k8sConfig);
             }
 
             if (File.Exists(KubeConfigDefaultLocation))
             {
-                return BuildConfigFromConfigFile(kubeconfigPath: KubeConfigDefaultLocation);
+                return BuildConfigFromConfigFile(KubeConfigDefaultLocation);
             }
 
             if (IsInCluster())
@@ -77,7 +78,9 @@ namespace k8s
         /// <param name="masterUrl">kube api server endpoint</param>
         /// <param name="useRelativePaths">When <see langword="true"/>, the paths in the kubeconfig file will be considered to be relative to the directory in which the kubeconfig
         /// file is located. When <see langword="false"/>, the paths will be considered to be relative to the current working directory.</param>
-        public static KubernetesClientConfiguration BuildConfigFromConfigFile(string kubeconfigPath = null,
+        /// <returns>Instance of the<see cref="KubernetesClientConfiguration"/> class</returns>
+        public static KubernetesClientConfiguration BuildConfigFromConfigFile(
+            string kubeconfigPath = null,
             string currentContext = null, string masterUrl = null, bool useRelativePaths = true)
         {
             return BuildConfigFromConfigFile(new FileInfo(kubeconfigPath ?? KubeConfigDefaultLocation), currentContext,
@@ -92,7 +95,9 @@ namespace k8s
         /// <param name="masterUrl">override the kube api server endpoint, set null if do not want to override</param>
         /// <param name="useRelativePaths">When <see langword="true"/>, the paths in the kubeconfig file will be considered to be relative to the directory in which the kubeconfig
         /// file is located. When <see langword="false"/>, the paths will be considered to be relative to the current working directory.</param>
-        public static KubernetesClientConfiguration BuildConfigFromConfigFile(FileInfo kubeconfig,
+        /// <returns>Instance of the<see cref="KubernetesClientConfiguration"/> class</returns>
+        public static KubernetesClientConfiguration BuildConfigFromConfigFile(
+            FileInfo kubeconfig,
             string currentContext = null, string masterUrl = null, bool useRelativePaths = true)
         {
             return BuildConfigFromConfigFileAsync(kubeconfig, currentContext, masterUrl, useRelativePaths).GetAwaiter()
@@ -107,7 +112,9 @@ namespace k8s
         /// <param name="masterUrl">override the kube api server endpoint, set null if do not want to override</param>
         /// <param name="useRelativePaths">When <see langword="true"/>, the paths in the kubeconfig file will be considered to be relative to the directory in which the kubeconfig
         /// file is located. When <see langword="false"/>, the paths will be considered to be relative to the current working directory.</param>
-        public static async Task<KubernetesClientConfiguration> BuildConfigFromConfigFileAsync(FileInfo kubeconfig,
+        /// <returns>Instance of the<see cref="KubernetesClientConfiguration"/> class</returns>
+        public static async Task<KubernetesClientConfiguration> BuildConfigFromConfigFileAsync(
+            FileInfo kubeconfig,
             string currentContext = null, string masterUrl = null, bool useRelativePaths = true)
         {
             if (kubeconfig == null)
@@ -127,7 +134,9 @@ namespace k8s
         /// <param name="kubeconfig">Stream of the kubeconfig, cannot be null</param>
         /// <param name="currentContext">Override the current context in config, set null if do not want to override</param>
         /// <param name="masterUrl">Override the Kubernetes API server endpoint, set null if do not want to override</param>
-        public static KubernetesClientConfiguration BuildConfigFromConfigFile(Stream kubeconfig,
+        /// <returns>Instance of the<see cref="KubernetesClientConfiguration"/> class</returns>
+        public static KubernetesClientConfiguration BuildConfigFromConfigFile(
+            Stream kubeconfig,
             string currentContext = null, string masterUrl = null)
         {
             return BuildConfigFromConfigFileAsync(kubeconfig, currentContext, masterUrl).GetAwaiter().GetResult();
@@ -139,7 +148,9 @@ namespace k8s
         /// <param name="kubeconfig">Stream of the kubeconfig, cannot be null</param>
         /// <param name="currentContext">Override the current context in config, set null if do not want to override</param>
         /// <param name="masterUrl">Override the Kubernetes API server endpoint, set null if do not want to override</param>
-        public static async Task<KubernetesClientConfiguration> BuildConfigFromConfigFileAsync(Stream kubeconfig,
+        /// <returns>Instance of the<see cref="KubernetesClientConfiguration"/> class</returns>
+        public static async Task<KubernetesClientConfiguration> BuildConfigFromConfigFileAsync(
+            Stream kubeconfig,
             string currentContext = null, string masterUrl = null)
         {
             if (kubeconfig == null)
@@ -163,16 +174,24 @@ namespace k8s
         /// <summary>
         /// Initializes a new instance of <see cref="KubernetesClientConfiguration"/> from pre-loaded config object.
         /// </summary>
-        /// <param name="k8sConfig">A <see cref="K8SConfiguration"/>, for example loaded from <see cref="LoadKubeConfigAsync(string, bool)" /></param>
+        /// <param name="k8SConfig">A <see cref="K8SConfiguration"/>, for example loaded from <see cref="LoadKubeConfigAsync(string, bool)" /></param>
         /// <param name="currentContext">Override the current context in config, set null if do not want to override</param>
         /// <param name="masterUrl">Override the Kubernetes API server endpoint, set null if do not want to override</param>
-        public static KubernetesClientConfiguration BuildConfigFromConfigObject(K8SConfiguration k8SConfig,
+        /// <returns>Instance of the<see cref="KubernetesClientConfiguration"/> class</returns>
+        public static KubernetesClientConfiguration BuildConfigFromConfigObject(
+            K8SConfiguration k8SConfig,
             string currentContext = null, string masterUrl = null)
             => GetKubernetesClientConfiguration(currentContext, masterUrl, k8SConfig);
 
-        private static KubernetesClientConfiguration GetKubernetesClientConfiguration(string currentContext,
+        private static KubernetesClientConfiguration GetKubernetesClientConfiguration(
+            string currentContext,
             string masterUrl, K8SConfiguration k8SConfig)
         {
+            if (k8SConfig == null)
+            {
+                throw new ArgumentNullException(nameof(k8SConfig));
+            }
+
             var k8SConfiguration = new KubernetesClientConfiguration();
 
             currentContext = currentContext ?? k8SConfig.CurrentContext;
@@ -196,7 +215,7 @@ namespace k8s
         }
 
         /// <summary>
-        ///     Validates and Intializes Client Configuration
+        ///     Validates and Initializes Client Configuration
         /// </summary>
         /// <param name="k8SConfig">Kubernetes Configuration</param>
         /// <param name="currentContext">Current Context</param>
@@ -233,7 +252,8 @@ namespace k8s
         private void SetClusterDetails(K8SConfiguration k8SConfig, Context activeContext)
         {
             var clusterDetails =
-                k8SConfig.Clusters.FirstOrDefault(c => c.Name.Equals(activeContext.ContextDetails.Cluster,
+                k8SConfig.Clusters.FirstOrDefault(c => c.Name.Equals(
+                    activeContext.ContextDetails.Cluster,
                     StringComparison.OrdinalIgnoreCase));
 
             if (clusterDetails?.ClusterEndpoint == null)
@@ -249,9 +269,25 @@ namespace k8s
             Host = clusterDetails.ClusterEndpoint.Server;
             SkipTlsVerify = clusterDetails.ClusterEndpoint.SkipTlsVerify;
 
-            if (!Uri.TryCreate(Host, UriKind.Absolute, out Uri uri))
+            if (!Uri.TryCreate(Host, UriKind.Absolute, out var uri))
             {
                 throw new KubeConfigException($"Bad server host URL `{Host}` (cannot be parsed)");
+            }
+
+            if (IPAddress.TryParse(uri.Host, out var ipAddress))
+            {
+                if (IPAddress.Equals(IPAddress.Any, ipAddress))
+                {
+                    var builder = new UriBuilder(Host);
+                    builder.Host = $"{IPAddress.Loopback}";
+                    Host = builder.ToString();
+                }
+                else if (IPAddress.Equals(IPAddress.IPv6Any, ipAddress))
+                {
+                    var builder = new UriBuilder(Host);
+                    builder.Host = $"{IPAddress.IPv6Loopback}";
+                    Host = builder.ToString();
+                }
             }
 
             if (uri.Scheme == "https")
@@ -263,7 +299,8 @@ namespace k8s
                 }
                 else if (!string.IsNullOrEmpty(clusterDetails.ClusterEndpoint.CertificateAuthority))
                 {
-                    SslCaCerts = new X509Certificate2Collection(new X509Certificate2(GetFullPath(k8SConfig,
+                    SslCaCerts = new X509Certificate2Collection(new X509Certificate2(GetFullPath(
+                        k8SConfig,
                         clusterDetails.ClusterEndpoint.CertificateAuthority)));
                 }
             }
@@ -276,7 +313,8 @@ namespace k8s
                 return;
             }
 
-            var userDetails = k8SConfig.Users.FirstOrDefault(c => c.Name.Equals(activeContext.ContextDetails.User,
+            var userDetails = k8SConfig.Users.FirstOrDefault(c => c.Name.Equals(
+                activeContext.ContextDetails.User,
                 StringComparison.OrdinalIgnoreCase));
 
             if (userDetails == null)
@@ -325,7 +363,8 @@ namespace k8s
             if (userDetails.UserCredentials.AuthProvider != null)
             {
                 if (userDetails.UserCredentials.AuthProvider.Config != null
-                    && userDetails.UserCredentials.AuthProvider.Config.ContainsKey("access-token"))
+                    && (userDetails.UserCredentials.AuthProvider.Config.ContainsKey("access-token")
+                        || userDetails.UserCredentials.AuthProvider.Config.ContainsKey("id-token")))
                 {
                     switch (userDetails.UserCredentials.AuthProvider.Name)
                     {
@@ -334,28 +373,24 @@ namespace k8s
                                 var config = userDetails.UserCredentials.AuthProvider.Config;
                                 if (config.ContainsKey("expires-on"))
                                 {
-                                    var expiresOn = Int32.Parse(config["expires-on"]);
+                                    var expiresOn = int.Parse(config["expires-on"]);
                                     DateTimeOffset expires;
-#if NET452
-                                    var epoch = new DateTimeOffset(1970, 1, 1, 0, 0, 0, TimeSpan.Zero);
-                                    expires
-     = epoch.AddSeconds(expiresOn);
-#else
                                     expires = DateTimeOffset.FromUnixTimeSeconds(expiresOn);
-#endif
 
-                                    if (DateTimeOffset.Compare(expires
-                                            , DateTimeOffset.Now)
+                                    if (DateTimeOffset.Compare(
+                                        expires,
+                                        DateTimeOffset.Now)
                                         <= 0)
                                     {
                                         var tenantId = config["tenant-id"];
                                         var clientId = config["client-id"];
                                         var apiServerId = config["apiserver-id"];
                                         var refresh = config["refresh-token"];
-                                        var newToken = RenewAzureToken(tenantId
-                                            , clientId
-                                            , apiServerId
-                                            , refresh);
+                                        var newToken = RenewAzureToken(
+                                            tenantId,
+                                            clientId,
+                                            apiServerId,
+                                            refresh);
                                         config["access-token"] = newToken;
                                     }
                                 }
@@ -364,12 +399,36 @@ namespace k8s
                                 userCredentialsFound = true;
                                 break;
                             }
+
                         case "gcp":
                             {
                                 // config
                                 var config = userDetails.UserCredentials.AuthProvider.Config;
                                 TokenProvider = new GcpTokenProvider(config["cmd-path"]);
                                 userCredentialsFound = true;
+                                break;
+                            }
+
+                        case "oidc":
+                            {
+                                var config = userDetails.UserCredentials.AuthProvider.Config;
+                                AccessToken = config["id-token"];
+                                if (config.ContainsKey("client-id")
+                                    && config.ContainsKey("idp-issuer-url")
+                                    && config.ContainsKey("id-token")
+                                    && config.ContainsKey("refresh-token"))
+                                {
+                                    string clientId = config["client-id"];
+                                    string clientSecret = config.ContainsKey("client-secret") ? config["client-secret"] : null;
+                                    string idpIssuerUrl = config["idp-issuer-url"];
+                                    string idToken = config["id-token"];
+                                    string refreshToken = config["refresh-token"];
+
+                                    TokenProvider = new OidcTokenProvider(clientId, clientSecret, idpIssuerUrl, idToken, refreshToken);
+
+                                    userCredentialsFound = true;
+                                }
+
                                 break;
                             }
                     }
@@ -389,8 +448,13 @@ namespace k8s
                     throw new KubeConfigException("External command execution missing ApiVersion key");
                 }
 
-                var token = ExecuteExternalCommand(userDetails.UserCredentials.ExternalExecution);
-                AccessToken = token;
+                var (accessToken, clientCertificateData, clientCertificateKeyData) = ExecuteExternalCommand(userDetails.UserCredentials.ExternalExecution);
+                AccessToken = accessToken;
+                // When reading ClientCertificateData from a config file it will be base64 encoded, and code later in the system (see CertUtils.GeneratePfx)
+                // expects ClientCertificateData and ClientCertificateKeyData to be base64 encoded because of this. However the string returned by external
+                // auth providers is the raw certificate and key PEM text, so we need to take that and base64 encoded it here so it can be decoded later.
+                ClientCertificateData = clientCertificateData == null ? null : Convert.ToBase64String(System.Text.Encoding.ASCII.GetBytes(clientCertificateData));
+                ClientCertificateKeyData = clientCertificateKeyData == null ? null : Convert.ToBase64String(System.Text.Encoding.ASCII.GetBytes(clientCertificateKeyData));
 
                 userCredentialsFound = true;
             }
@@ -409,11 +473,16 @@ namespace k8s
 
         public static Process CreateRunnableExternalProcess(ExternalExecution config)
         {
+            if (config == null)
+            {
+                throw new ArgumentNullException(nameof(config));
+            }
+
             var execInfo = new Dictionary<string, dynamic>
             {
-                {"apiVersion", config.ApiVersion },
-                {"kind", "ExecCredentials" },
-                {"spec", new Dictionary<string, bool> { {"interactive", Environment.UserInteractive } } },
+                { "apiVersion", config.ApiVersion },
+                { "kind", "ExecCredentials" },
+                { "spec", new Dictionary<string, bool> { { "interactive", Environment.UserInteractive } } },
             };
 
             var process = new Process();
@@ -425,9 +494,8 @@ namespace k8s
                 {
                     if (configEnvironmentVariable.ContainsKey("name") && configEnvironmentVariable.ContainsKey("value"))
                     {
-                        process.StartInfo.EnvironmentVariables.Add(
-                            configEnvironmentVariable["name"],
-                            configEnvironmentVariable["value"]);
+                        var name = configEnvironmentVariable["name"];
+                        process.StartInfo.EnvironmentVariables[name] = configEnvironmentVariable["value"];
                     }
                     else
                     {
@@ -458,9 +526,16 @@ namespace k8s
         /// https://github.com/kubernetes-client/python-base/blob/master/config/exec_provider.py
         /// </summary>
         /// <param name="config">The external command execution configuration</param>
-        /// <returns>The token received from the external command execution</returns>
-        public static string ExecuteExternalCommand(ExternalExecution config)
+        /// <returns>
+        /// The token, client certificate data, and the client key data received from the external command execution
+        /// </returns>
+        public static (string, string, string) ExecuteExternalCommand(ExternalExecution config)
         {
+            if (config == null)
+            {
+                throw new ArgumentNullException(nameof(config));
+            }
+
             var process = CreateRunnableExternalProcess(config);
 
             try
@@ -491,7 +566,23 @@ namespace k8s
                         $"external exec failed because api version {responseObject.ApiVersion} does not match {config.ApiVersion}");
                 }
 
-                return responseObject.Status["token"];
+                if (responseObject.Status.ContainsKey("token"))
+                {
+                    return (responseObject.Status["token"], null, null);
+                }
+                else if (responseObject.Status.ContainsKey("clientCertificateData"))
+                {
+                    if (!responseObject.Status.ContainsKey("clientKeyData"))
+                    {
+                        throw new KubeConfigException($"external exec failed missing clientKeyData field in plugin output");
+                    }
+
+                    return (null, responseObject.Status["clientCertificateData"], responseObject.Status["clientKeyData"]);
+                }
+                else
+                {
+                    throw new KubeConfigException($"external exec failed missing token or clientCertificateData field in plugin output");
+                }
             }
             catch (JsonSerializationException ex)
             {
@@ -510,7 +601,8 @@ namespace k8s
         /// <param name="useRelativePaths">When <see langword="true"/>, the paths in the kubeconfig file will be considered to be relative to the directory in which the kubeconfig
         /// file is located. When <see langword="false"/>, the paths will be considered to be relative to the current working directory.</param>
         /// <returns>Instance of the <see cref="K8SConfiguration"/> class</returns>
-        public static async Task<K8SConfiguration> LoadKubeConfigAsync(string kubeconfigPath = null,
+        public static async Task<K8SConfiguration> LoadKubeConfigAsync(
+            string kubeconfigPath = null,
             bool useRelativePaths = true)
         {
             var fileInfo = new FileInfo(kubeconfigPath ?? KubeConfigDefaultLocation);
@@ -537,9 +629,16 @@ namespace k8s
         /// <param name="useRelativePaths">When <see langword="true"/>, the paths in the kubeconfig file will be considered to be relative to the directory in which the kubeconfig
         /// file is located. When <see langword="false"/>, the paths will be considered to be relative to the current working directory.</param>
         /// <returns>Instance of the <see cref="K8SConfiguration"/> class</returns>
-        public static async Task<K8SConfiguration> LoadKubeConfigAsync(FileInfo kubeconfig,
+        public static async Task<K8SConfiguration> LoadKubeConfigAsync(
+            FileInfo kubeconfig,
             bool useRelativePaths = true)
         {
+            if (kubeconfig == null)
+            {
+                throw new ArgumentNullException(nameof(kubeconfig));
+            }
+
+
             if (!kubeconfig.Exists)
             {
                 throw new KubeConfigException($"kubeconfig file not found at {kubeconfig.FullName}");
@@ -583,7 +682,7 @@ namespace k8s
         /// <summary>
         ///     Loads Kube Config
         /// </summary>
-        /// <param name="kubeconfig">Kube config file contents stream</param>
+        /// <param name="kubeconfigStream">Kube config file contents stream</param>
         /// <returns>Instance of the <see cref="K8SConfiguration"/> class</returns>
         public static K8SConfiguration LoadKubeConfig(Stream kubeconfigStream)
         {
@@ -593,12 +692,12 @@ namespace k8s
         /// <summary>
         ///     Loads Kube Config
         /// </summary>
-        /// <param name="kubeconfigs">List of kube config file contents</param>
+        /// <param name="kubeConfigs">List of kube config file contents</param>
         /// <param name="useRelativePaths">When <see langword="true"/>, the paths in the kubeconfig file will be considered to be relative to the directory in which the kubeconfig
         /// file is located. When <see langword="false"/>, the paths will be considered to be relative to the current working directory.</param>
         /// <returns>Instance of the <see cref="K8SConfiguration"/> class</returns>
         /// <remarks>
-        ///     The kube config files will be merges into a single <see cref="K8SConfiguration"/>, where first occurence wins.
+        ///     The kube config files will be merges into a single <see cref="K8SConfiguration"/>, where first occurrence wins.
         ///     See https://kubernetes.io/docs/concepts/configuration/organize-cluster-access-kubeconfig/#merging-kubeconfig-files.
         /// </remarks>
         internal static K8SConfiguration LoadKubeConfig(FileInfo[] kubeConfigs, bool useRelativePaths = true)
@@ -609,15 +708,16 @@ namespace k8s
         /// <summary>
         ///     Loads Kube Config
         /// </summary>
-        /// <param name="kubeconfigs">List of kube config file contents</param>
+        /// <param name="kubeConfigs">List of kube config file contents</param>
         /// <param name="useRelativePaths">When <see langword="true"/>, the paths in the kubeconfig file will be considered to be relative to the directory in which the kubeconfig
         /// file is located. When <see langword="false"/>, the paths will be considered to be relative to the current working directory.</param>
         /// <returns>Instance of the <see cref="K8SConfiguration"/> class</returns>
         /// <remarks>
-        ///     The kube config files will be merges into a single <see cref="K8SConfiguration"/>, where first occurence wins.
+        ///     The kube config files will be merges into a single <see cref="K8SConfiguration"/>, where first occurrence wins.
         ///     See https://kubernetes.io/docs/concepts/configuration/organize-cluster-access-kubeconfig/#merging-kubeconfig-files.
         /// </remarks>
-        internal static async Task<K8SConfiguration> LoadKubeConfigAsync(FileInfo[] kubeConfigs,
+        internal static async Task<K8SConfiguration> LoadKubeConfigAsync(
+            FileInfo[] kubeConfigs,
             bool useRelativePaths = true)
         {
             var basek8SConfig = await LoadKubeConfigAsync(kubeConfigs[0], useRelativePaths).ConfigureAwait(false);
@@ -690,19 +790,9 @@ namespace k8s
                 }
             }
 
-            if (mergek8SConfig.Extensions != null)
-            {
-                foreach (var extension in mergek8SConfig.Extensions)
-                {
-                    if (basek8SConfig.Extensions?.ContainsKey(extension.Key) == false)
-                    {
-                        basek8SConfig.Extensions[extension.Key] = extension.Value;
-                    }
-                }
-            }
-
             // Note, Clusters, Contexts, and Extensions are map-like in config despite being represented as a list here:
             // https://github.com/kubernetes/client-go/blob/ede92e0fe62deed512d9ceb8bf4186db9f3776ff/tools/clientcmd/api/types.go#L238
+            basek8SConfig.Extensions = MergeLists(basek8SConfig.Extensions, mergek8SConfig.Extensions, (s) => s.Name);
             basek8SConfig.Clusters = MergeLists(basek8SConfig.Clusters, mergek8SConfig.Clusters, (s) => s.Name);
             basek8SConfig.Users = MergeLists(basek8SConfig.Users, mergek8SConfig.Users, (s) => s.Name);
             basek8SConfig.Contexts = MergeLists(basek8SConfig.Contexts, mergek8SConfig.Contexts, (s) => s.Name);
@@ -711,7 +801,7 @@ namespace k8s
         private static IEnumerable<T> MergeLists<T>(IEnumerable<T> baseList, IEnumerable<T> mergeList,
             Func<T, string> getNameFunc)
         {
-            if (mergeList != null && mergeList.Count() > 0)
+            if (mergeList != null && mergeList.Any())
             {
                 var mapping = new Dictionary<string, T>();
                 foreach (var item in baseList)

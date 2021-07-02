@@ -8,10 +8,11 @@ namespace k8s.Tests.Logging
     /// <summary>
     ///     An implementation of <see cref="ILogger"/> that writes to the output of the current Xunit test.
     /// </summary>
-    sealed class TestOutputLogger
+    internal sealed class TestOutputLogger
         : ILogger
     {
         /// <summary>
+        /// Initializes a new instance of the <see cref="TestOutputLogger"/> class.
         ///     Create a new <see cref="TestOutputLogger"/>.
         /// </summary>
         /// <param name="testOutput">
@@ -30,7 +31,7 @@ namespace k8s.Tests.Logging
                 throw new ArgumentNullException(nameof(testOutput));
             }
 
-            if (String.IsNullOrWhiteSpace(loggerCategory))
+            if (string.IsNullOrWhiteSpace(loggerCategory))
             {
                 throw new ArgumentException(
                     "Argument cannot be null, empty, or entirely composed of whitespace: 'loggerCategory'.",
@@ -83,7 +84,8 @@ namespace k8s.Tests.Logging
                 throw new ArgumentNullException(nameof(formatter));
             }
 
-            TestOutput.WriteLine(String.Format("[{0}] {1}: {2}",
+            TestOutput.WriteLine(string.Format(
+                "[{0}] {1}: {2}",
                 level,
                 LoggerCategory,
                 formatter(state, exception)));

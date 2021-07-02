@@ -1,9 +1,6 @@
 using System;
-using System.Collections.Generic;
 using System.Net.WebSockets;
-#if (NET452 || NETSTANDARD2_0)
 using System.Net.Security;
-#endif
 using System.Security.Cryptography.X509Certificates;
 using System.Threading;
 using System.Threading.Tasks;
@@ -29,31 +26,16 @@ namespace k8s
 
         public virtual WebSocketBuilder SetRequestHeader(string headerName, string headerValue)
         {
-            this.WebSocket.Options.SetRequestHeader(headerName, headerValue);
+            WebSocket.Options.SetRequestHeader(headerName, headerValue);
             return this;
         }
 
         public virtual WebSocketBuilder AddClientCertificate(X509Certificate2 certificate)
         {
-            this.WebSocket.Options.ClientCertificates.Add(certificate);
+            WebSocket.Options.ClientCertificates.Add(certificate);
             return this;
         }
 
-#if (NET452 || NETSTANDARD2_0)
-        public WebSocketBuilder SetServerCertificateValidationCallback(
-            RemoteCertificateValidationCallback validationCallback)
-        {
-            System.Net.ServicePointManager.ServerCertificateValidationCallback += validationCallback;
-            return this;
-        }
-
-        public void CleanupServerCertificateValidationCallback(RemoteCertificateValidationCallback validationCallback)
-        {
-            System.Net.ServicePointManager.ServerCertificateValidationCallback -= validationCallback;
-        }
-#endif
-
-#if NETCOREAPP2_1
         public WebSocketBuilder ExpectServerCertificate(X509Certificate2Collection serverCertificate)
         {
             Options.RemoteCertificateValidationCallback
@@ -73,12 +55,10 @@ namespace k8s
             return this;
         }
 
-#endif // NETCOREAPP2_1
-
         public virtual async Task<WebSocket> BuildAndConnectAsync(Uri uri, CancellationToken cancellationToken)
         {
-            await this.WebSocket.ConnectAsync(uri, cancellationToken).ConfigureAwait(false);
-            return this.WebSocket;
+            await WebSocket.ConnectAsync(uri, cancellationToken).ConfigureAwait(false);
+            return WebSocket;
         }
     }
 }

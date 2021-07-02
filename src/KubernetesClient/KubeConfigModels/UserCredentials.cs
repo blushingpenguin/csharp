@@ -1,9 +1,8 @@
+using System.Collections.Generic;
+using YamlDotNet.Serialization;
+
 namespace k8s.KubeConfigModels
 {
-    using System.Collections.Generic;
-    using YamlDotNet.RepresentationModel;
-    using YamlDotNet.Serialization;
-
     /// <summary>
     /// Contains information that describes identity information.  This is use to tell the kubernetes cluster who you are.
     /// </summary>
@@ -40,13 +39,13 @@ namespace k8s.KubeConfigModels
         public string Token { get; set; }
 
         /// <summary>
-        /// Gets or sets the username to imperonate. The name matches the flag.
+        /// Gets or sets the username to impersonate. The name matches the flag.
         /// </summary>
         [YamlMember(Alias = "as")]
         public string Impersonate { get; set; }
 
         /// <summary>
-        /// Gets or sets the groups to imperonate.
+        /// Gets or sets the groups to impersonate.
         /// </summary>
         [YamlMember(Alias = "as-groups", ApplyNamingConventions = false)]
         public IEnumerable<string> ImpersonateGroups { get; set; } = new string[0];
@@ -79,7 +78,7 @@ namespace k8s.KubeConfigModels
         /// Gets or sets additional information. This is useful for extenders so that reads and writes don't clobber unknown fields.
         /// </summary>
         [YamlMember(Alias = "extensions")]
-        public IDictionary<string, dynamic> Extensions { get; set; }
+        public IEnumerable<NamedExtension> Extensions { get; set; }
 
         /// <summary>
         /// Gets or sets external command and its arguments to receive user credentials

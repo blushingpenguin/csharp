@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using System;
+using Microsoft.AspNetCore.Mvc;
 
 namespace k8s.Tests.Mock.Server
 {
@@ -11,6 +12,7 @@ namespace k8s.Tests.Mock.Server
     public class Startup
     {
         /// <summary>
+        /// Initializes a new instance of the <see cref="Startup"/> class.
         ///     Create a new <see cref="Startup"/>.
         /// </summary>
         public Startup()
@@ -23,7 +25,7 @@ namespace k8s.Tests.Mock.Server
         /// <param name="services">
         ///     The service collection to configure.
         /// </param>
-        public void ConfigureServices(IServiceCollection services)
+        public static void ConfigureServices(IServiceCollection services)
         {
             if (services == null)
             {
@@ -34,7 +36,7 @@ namespace k8s.Tests.Mock.Server
             {
                 logging.ClearProviders(); // Logger provider will be added by the calling test.
             });
-            services.AddMvc();
+            services.AddMvc(opt => opt.EnableEndpointRouting = false);
         }
 
         /// <summary>
@@ -43,12 +45,11 @@ namespace k8s.Tests.Mock.Server
         /// <param name="app">
         ///     The application pipeline builder.
         /// </param>
-        public void Configure(IApplicationBuilder app)
+        public static void Configure(IApplicationBuilder app)
         {
             app.UseWebSockets(new WebSocketOptions
             {
                 KeepAliveInterval = TimeSpan.FromSeconds(5),
-                ReceiveBufferSize = 2048,
             });
             app.UseMvc();
         }

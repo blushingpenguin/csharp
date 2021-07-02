@@ -35,11 +35,18 @@ namespace k8s.Models
         /// must contain at least one address but no more than 100.</param>
         /// <param name="conditions">conditions contains information about the
         /// current status of the endpoint.</param>
+        /// <param name="hints">hints contains information associated with how
+        /// an endpoint should be consumed.</param>
         /// <param name="hostname">hostname of this endpoint. This field may be
         /// used by consumers of endpoints to distinguish endpoints from each
         /// other (e.g. in DNS names). Multiple endpoints which use the same
         /// hostname should be considered fungible (e.g. multiple A values in
-        /// DNS). Must pass DNS Label (RFC 1123) validation.</param>
+        /// DNS). Must be lowercase and pass DNS Label (RFC 1123)
+        /// validation.</param>
+        /// <param name="nodeName">nodeName represents the name of the Node
+        /// hosting this endpoint. This can be used to determine endpoints
+        /// local to a Node. This field can be enabled with the
+        /// EndpointSliceNodeName feature gate.</param>
         /// <param name="targetRef">targetRef is a reference to a Kubernetes
         /// object that represents this endpoint.</param>
         /// <param name="topology">topology contains arbitrary topology
@@ -59,12 +66,16 @@ namespace k8s.Models
         /// * topology.kubernetes.io/region: the value indicates the region
         /// where the
         /// endpoint is located. This should match the corresponding node
-        /// label.</param>
-        public V1beta1Endpoint(IList<string> addresses, V1beta1EndpointConditions conditions = default(V1beta1EndpointConditions), string hostname = default(string), V1ObjectReference targetRef = default(V1ObjectReference), IDictionary<string, string> topology = default(IDictionary<string, string>))
+        /// label.
+        /// This field is deprecated and will be removed in future api
+        /// versions.</param>
+        public V1beta1Endpoint(IList<string> addresses, V1beta1EndpointConditions conditions = default(V1beta1EndpointConditions), V1beta1EndpointHints hints = default(V1beta1EndpointHints), string hostname = default(string), string nodeName = default(string), V1ObjectReference targetRef = default(V1ObjectReference), IDictionary<string, string> topology = default(IDictionary<string, string>))
         {
             Addresses = addresses;
             Conditions = conditions;
+            Hints = hints;
             Hostname = hostname;
+            NodeName = nodeName;
             TargetRef = targetRef;
             Topology = topology;
             CustomInit();
@@ -93,14 +104,30 @@ namespace k8s.Models
         public V1beta1EndpointConditions Conditions { get; set; }
 
         /// <summary>
+        /// Gets or sets hints contains information associated with how an
+        /// endpoint should be consumed.
+        /// </summary>
+        [JsonProperty(PropertyName = "hints")]
+        public V1beta1EndpointHints Hints { get; set; }
+
+        /// <summary>
         /// Gets or sets hostname of this endpoint. This field may be used by
         /// consumers of endpoints to distinguish endpoints from each other
         /// (e.g. in DNS names). Multiple endpoints which use the same hostname
         /// should be considered fungible (e.g. multiple A values in DNS). Must
-        /// pass DNS Label (RFC 1123) validation.
+        /// be lowercase and pass DNS Label (RFC 1123) validation.
         /// </summary>
         [JsonProperty(PropertyName = "hostname")]
         public string Hostname { get; set; }
+
+        /// <summary>
+        /// Gets or sets nodeName represents the name of the Node hosting this
+        /// endpoint. This can be used to determine endpoints local to a Node.
+        /// This field can be enabled with the EndpointSliceNodeName feature
+        /// gate.
+        /// </summary>
+        [JsonProperty(PropertyName = "nodeName")]
+        public string NodeName { get; set; }
 
         /// <summary>
         /// Gets or sets targetRef is a reference to a Kubernetes object that
@@ -128,6 +155,8 @@ namespace k8s.Models
         /// where the
         /// endpoint is located. This should match the corresponding node
         /// label.
+        /// This field is deprecated and will be removed in future api
+        /// versions.
         /// </summary>
         [JsonProperty(PropertyName = "topology")]
         public IDictionary<string, string> Topology { get; set; }

@@ -1,7 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
 using System;
 using System.Net.WebSockets;
-using System.Threading;
 using System.Threading.Tasks;
 
 namespace k8s.Tests.Mock.Server.Controllers
@@ -14,6 +13,7 @@ namespace k8s.Tests.Mock.Server.Controllers
         : Controller
     {
         /// <summary>
+        /// Initializes a new instance of the <see cref="PodExecController"/> class.
         ///     Create a new <see cref="PodExecController"/>.
         /// </summary>
         /// <param name="webSocketTestAdapter">
@@ -32,7 +32,7 @@ namespace k8s.Tests.Mock.Server.Controllers
         /// <summary>
         ///     The adapter used to capture sockets accepted by the test server and provide them to the calling test.
         /// </summary>
-        WebSocketTestAdapter WebSocketTestAdapter { get; }
+        private WebSocketTestAdapter WebSocketTestAdapter { get; }
 
         /// <summary>
         ///     Mock Kubernetes API: exec-in-pod.
@@ -51,12 +51,12 @@ namespace k8s.Tests.Mock.Server.Controllers
                 return BadRequest("Exec requires WebSockets");
             }
 
-            WebSocket webSocket = await HttpContext.WebSockets.AcceptWebSocketAsync(
-                subProtocol: WebSocketProtocol.ChannelWebSocketProtocol);
+            var webSocket = await HttpContext.WebSockets.AcceptWebSocketAsync(
+                WebSocketProtocol.ChannelWebSocketProtocol).ConfigureAwait(false);
 
             WebSocketTestAdapter.AcceptedPodExecV1Connection.AcceptServerSocket(webSocket);
 
-            await WebSocketTestAdapter.TestCompleted;
+            await WebSocketTestAdapter.TestCompleted.ConfigureAwait(false);
 
             return Ok();
         }

@@ -23,14 +23,15 @@ namespace k8s
 
             try
             {
-                using (var muxedStream = await this.MuxedStreamNamespacedPodExecAsync(name: name,
-                    @namespace: @namespace, command: command, container: container, tty: tty,
+                using (var muxedStream = await MuxedStreamNamespacedPodExecAsync(
+                    name,
+                    @namespace, command, container, tty: tty,
                     cancellationToken: cancellationToken).ConfigureAwait(false))
-                using (Stream stdIn = muxedStream.GetStream(null, ChannelIndex.StdIn))
-                using (Stream stdOut = muxedStream.GetStream(ChannelIndex.StdOut, null))
-                using (Stream stdErr = muxedStream.GetStream(ChannelIndex.StdErr, null))
-                using (Stream error = muxedStream.GetStream(ChannelIndex.Error, null))
-                using (StreamReader errorReader = new StreamReader(error))
+                using (var stdIn = muxedStream.GetStream(null, ChannelIndex.StdIn))
+                using (var stdOut = muxedStream.GetStream(ChannelIndex.StdOut, null))
+                using (var stdErr = muxedStream.GetStream(ChannelIndex.StdErr, null))
+                using (var error = muxedStream.GetStream(ChannelIndex.Error, null))
+                using (var errorReader = new StreamReader(error))
                 {
                     muxedStream.Start();
 
@@ -46,7 +47,7 @@ namespace k8s
             }
             catch (HttpOperationException httpEx) when (httpEx.Body is V1Status)
             {
-                throw new KubernetesException((V1Status)httpEx.Body);
+                throw new KubernetesException((V1Status)httpEx.Body, httpEx);
             }
         }
 
@@ -79,7 +80,7 @@ namespace k8s
             {
                 var exitCodeString = status.Details.Causes.FirstOrDefault(c => c.Reason == "ExitCode")?.Message;
 
-                if (int.TryParse(exitCodeString, out int exitCode))
+                if (int.TryParse(exitCodeString, out var exitCode))
                 {
                     return exitCode;
                 }

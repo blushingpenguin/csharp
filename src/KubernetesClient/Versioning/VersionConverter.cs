@@ -59,12 +59,18 @@ namespace k8s.Versioning
                 .GroupBy(x => x.Kind)
                 .ToDictionary(x => x.Key, kindGroup => kindGroup
                     .GroupBy(x => x.ApiVersion)
-                    .ToDictionary(x => x.Key,
+                    .ToDictionary(
+                        x => x.Key,
                         versionGroup => versionGroup.Select(x => x.Type).Distinct().Single())); // should only be one type for each Kind/Version combination
         }
 
         public static object ConvertToVersion(object source, string apiVersion)
         {
+            if (source == null)
+            {
+                throw new ArgumentNullException(nameof(source));
+            }
+
             var type = source.GetType();
             var attr = GetKubernetesEntityAttribute(type);
             if (attr.ApiVersion == apiVersion)
@@ -128,11 +134,25 @@ namespace k8s.Versioning
                     obj.Kind = metadata.Kind;
                 });
             });
-            cfg.CreateMap<V1Subject, Rbacv1alpha1Subject>()
+            cfg.CreateMap<V1Subject, V1alpha1Subject>()
                 .ForMember(dest => dest.ApiVersion, opt => opt.Ignore())
                 .ReverseMap();
-            cfg.CreateMap<V1beta1Subject, Rbacv1alpha1Subject>()
+            cfg.CreateMap<Rbacv1beta1Subject, V1alpha1Subject>()
                 .ForMember(dest => dest.ApiVersion, opt => opt.Ignore())
+                .ReverseMap();
+            cfg.CreateMap<V1Subject, Rbacv1beta1Subject>()
+                .ForMember(dest => dest.ApiGroup, opt => opt.Ignore())
+                .ReverseMap();
+
+            cfg.CreateMap<V1alpha1RuntimeClass, V1RuntimeClass>()
+                .ForMember(dest => dest.Handler, opt => opt.MapFrom(src => src.Spec.RuntimeHandler))
+                .ForMember(dest => dest.Overhead, opt => opt.MapFrom(src => src.Spec.Overhead))
+                .ForMember(dest => dest.Scheduling, opt => opt.MapFrom(src => src.Spec.Scheduling))
+                .ReverseMap();
+            cfg.CreateMap<V1beta1RuntimeClass, V1RuntimeClass>()
+                .ForMember(dest => dest.Handler, opt => opt.MapFrom(src => src.Handler))
+                .ForMember(dest => dest.Overhead, opt => opt.MapFrom(src => src.Overhead))
+                .ForMember(dest => dest.Scheduling, opt => opt.MapFrom(src => src.Scheduling))
                 .ReverseMap();
             cfg.CreateMap<V1alpha1RuntimeClass, V1beta1RuntimeClass>()
                 .ForMember(dest => dest.Handler, opt => opt.MapFrom(src => src.Spec.RuntimeHandler))
@@ -151,11 +171,7 @@ namespace k8s.Versioning
             cfg.CreateMap<V2beta1ResourceMetricSource, V2beta2MetricTarget>()
                 .ForMember(dest => dest.AverageValue, opt => opt.MapFrom(src => src.TargetAverageValue))
                 .ForMember(dest => dest.Value, opt => opt.Ignore())
-#if NET452
-                .ForMember(dest => dest.Type, opt => opt.ResolveUsing(src => src.TargetAverageValue != null ? "AverageValue" : "Utilization" ))
-#else
                 .ForMember(dest => dest.Type, opt => opt.MapFrom((src, dest) => src.TargetAverageValue != null ? "AverageValue" : "Utilization"))
-#endif
                 .ForMember(dest => dest.AverageUtilization, opt => opt.MapFrom(src => src.TargetAverageUtilization));
             cfg.CreateMap<V2beta1ResourceMetricSource, V2beta2ResourceMetricSource>()
                 .ForMember(dest => dest.Target, opt => opt.MapFrom(src => src));
@@ -182,11 +198,7 @@ namespace k8s.Versioning
                 .ReverseMap();
             cfg.CreateMap<V2beta1PodsMetricSource, V2beta2MetricTarget>()
                 .ForMember(dest => dest.AverageValue, opt => opt.MapFrom(src => src.TargetAverageValue))
-#if NET452
-                .ForMember(dest => dest.Type, opt => opt.UseValue("AverageValue"))
-#else
                 .ForMember(dest => dest.Type, opt => opt.MapFrom((src, dest) => "AverageValue"))
-#endif
                 .ForMember(dest => dest.Value, opt => opt.Ignore())
                 .ForMember(dest => dest.AverageUtilization, opt => opt.Ignore());
             cfg.CreateMap<V2beta1PodsMetricSource, V2beta2PodsMetricSource>()
@@ -219,11 +231,7 @@ namespace k8s.Versioning
                 .ForMember(x => x.Value, opt => opt.MapFrom(src => src.TargetValue))
                 .ForMember(x => x.AverageValue, opt => opt.MapFrom(src => src.TargetAverageValue))
                 .ForMember(x => x.AverageUtilization, opt => opt.Ignore())
-#if NET452
-                .ForMember(x => x.Type, opt => opt.ResolveUsing(src => src.TargetValue != null ? "Value" : "AverageValue"));
-#else
                 .ForMember(x => x.Type, opt => opt.MapFrom((src, dest) => src.TargetValue != null ? "Value" : "AverageValue"));
-#endif
             cfg.CreateMap<V2beta1ExternalMetricSource, V2beta2ExternalMetricSource>()
                 .ForMember(x => x.Metric, opt => opt.MapFrom(src => src))
                 .ForMember(x => x.Target, opt => opt.MapFrom(src => src));
@@ -253,11 +261,7 @@ namespace k8s.Versioning
                 .ForMember(dest => dest.Value, opt => opt.MapFrom(src => src.TargetValue))
                 .ForMember(dest => dest.AverageUtilization, opt => opt.Ignore())
                 .ForMember(dest => dest.AverageValue, opt => opt.MapFrom(src => src.AverageValue))
-#if NET452
-                .ForMember(dest => dest.Type, opt => opt.ResolveUsing(src => src.TargetValue != null ? "Value" : "AverageValue"));
-#else
                 .ForMember(dest => dest.Type, opt => opt.MapFrom((src, dest) => src.TargetValue != null ? "Value" : "AverageValue"));
-#endif
             cfg.CreateMap<V2beta1ObjectMetricSource, V2beta2ObjectMetricSource>()
                 .ForMember(dest => dest.Metric, opt => opt.MapFrom(src => src))
                 .ForMember(dest => dest.Target, opt => opt.MapFrom(src => src))
@@ -402,7 +406,11 @@ namespace k8s.Versioning
                 .ForMember(dest => dest.CurrentMetrics, opt => opt.Ignore())
                 .ReverseMap();
 
-            cfg.CreateMap<V1Event, V1beta1Event>()
+            cfg.CreateMap<Corev1EventSeries, V1beta1EventSeries>()
+                .ForMember(dest => dest.LastObservedTime, opt => opt.MapFrom(src => src.LastObservedTime))
+                .ReverseMap();
+
+            cfg.CreateMap<Corev1Event, V1beta1Event>()
                 .ForMember(dest => dest.DeprecatedCount, opt => opt.Ignore())
                 .ForMember(dest => dest.DeprecatedFirstTimestamp, opt => opt.MapFrom(src => src.FirstTimestamp))
                 .ForMember(dest => dest.DeprecatedLastTimestamp, opt => opt.MapFrom(src => src.LastTimestamp))
@@ -410,6 +418,42 @@ namespace k8s.Versioning
                 .ForMember(dest => dest.Note, opt => opt.MapFrom(src => src.Message))
                 .ForMember(dest => dest.Regarding, opt => opt.MapFrom(src => src.InvolvedObject))
                 .ForMember(dest => dest.ReportingController, opt => opt.MapFrom(src => src.ReportingComponent))
+                .ReverseMap();
+
+            cfg.CreateMap<V2beta2ContainerResourceMetricSource, V2beta1ContainerResourceMetricSource>()
+                .ForMember(dest => dest.TargetAverageValue, opt => opt.MapFrom(src => src.Target.AverageValue))
+                .ForMember(dest => dest.TargetAverageUtilization, opt => opt.MapFrom(src => src.Target.AverageUtilization))
+                .ReverseMap();
+
+            cfg.CreateMap<V2beta2ContainerResourceMetricStatus, V2beta1ContainerResourceMetricStatus>()
+                .ForMember(dest => dest.CurrentAverageValue, opt => opt.MapFrom(src => src.Current.AverageValue))
+                .ForMember(dest => dest.CurrentAverageUtilization, opt => opt.MapFrom(src => src.Current.AverageUtilization))
+                .ReverseMap();
+
+
+            cfg.CreateMap<V1alpha1RoleBinding, V1beta1RoleBinding>().ReverseMap();
+            cfg.CreateMap<V1alpha1RoleBinding, V1RoleBinding>().ReverseMap();
+            cfg.CreateMap<V1beta1RoleBinding, V1RoleBinding>().ReverseMap();
+
+            cfg.CreateMap<V1beta1CSIDriverSpec, V1CSIDriverSpec>()
+                .ForMember(dest => dest.TokenRequests, opt => opt.Ignore());
+
+            cfg.CreateMap<V1CSIDriverSpec, V1beta1CSIDriverSpec>()
+                .ForMember(dest => dest.TokenRequests, opt => opt.Ignore());
+
+            cfg.CreateMap<V1alpha1ClusterRoleBinding, V1beta1ClusterRoleBinding>().ReverseMap();
+            cfg.CreateMap<V1alpha1ClusterRoleBinding, V1ClusterRoleBinding>().ReverseMap();
+            cfg.CreateMap<V1beta1ClusterRoleBinding, V1ClusterRoleBinding>().ReverseMap();
+            cfg.CreateMap<V1alpha1ClusterRoleBindingList, V1beta1ClusterRoleBindingList>().ReverseMap();
+            cfg.CreateMap<V1alpha1ClusterRoleBindingList, V1ClusterRoleBindingList>().ReverseMap();
+            cfg.CreateMap<V1beta1ClusterRoleBindingList, V1ClusterRoleBindingList>().ReverseMap();
+
+            cfg.CreateMap<V1beta1Endpoint, V1Endpoint>()
+                .ForMember(dest => dest.DeprecatedTopology, opt => opt.Ignore())
+                .ForMember(dest => dest.Zone, opt => opt.Ignore())
+                .ReverseMap();
+
+            cfg.CreateMap<V1beta1EndpointPort, Discoveryv1EndpointPort>()
                 .ReverseMap();
         }
     }

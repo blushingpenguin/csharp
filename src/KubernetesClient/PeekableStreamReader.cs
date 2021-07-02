@@ -18,14 +18,16 @@ namespace k8s
         private bool _eof = false;
         private TimeSpan? _timeout = null;
 
-        public PeekableStreamReader(Stream stream, int maxLineLength = Int32.MaxValue, TimeSpan? timeout = null)
+        public PeekableStreamReader(Stream stream, int maxLineLength = int.MaxValue, TimeSpan? timeout = null)
         {
             // This is arbitrary, but ~8k lines are not abnormal
             if (maxLineLength < 32768)
             {
-                throw new ArgumentOutOfRangeException(nameof(maxLineLength),
+                throw new ArgumentOutOfRangeException(
+                    nameof(maxLineLength),
                     "The maximum line length must be at least 32768");
             }
+
             _maxLineLength = maxLineLength;
             _stream = stream ?? throw new ArgumentNullException(nameof(stream));
             _timeout = timeout;
@@ -37,6 +39,7 @@ namespace k8s
             {
                 Buffer.BlockCopy(_buf, _bufPos, dst, 0, _bufLength - _bufPos);
             }
+
             _bufLength -= _bufPos;
             _bufPos = 0;
         }
@@ -58,10 +61,11 @@ namespace k8s
                 cts.CancelAfter(_timeout.Value);
                 cancellationToken = cts.Token;
             }
+
             try
             {
                 return await _stream.ReadAsync(_buf, _bufLength,
-                    _buf.Length - _bufLength, cancellationToken).ConfigureAwait(false);                
+                    _buf.Length - _bufLength, cancellationToken).ConfigureAwait(false);
             }
             finally
             {
@@ -87,15 +91,18 @@ namespace k8s
                         return result;
                     }
                 }
+
                 if (_eof)
                 {
                     return null;
                 }
+
                 // consume any previously read data
                 if (_bufPos > 0)
                 {
                     ShuffleConsumedBytes(_buf);
                 }
+
                 // make the buffer bigger if needed
                 int left = _buf.Length - _bufLength;
                 if (left < 512)
@@ -107,6 +114,7 @@ namespace k8s
                             "Reading from the stream failed because a line from the server was unexpectedly " +
                             $"greater than the configured maximum line length of {_maxLineLength}");
                     }
+
                     byte[] newbuf = new byte[newlen];
                     ShuffleConsumedBytes(newbuf);
                     _buf = newbuf;
@@ -127,6 +135,7 @@ namespace k8s
             {
                 return _peek.Dequeue();
             }
+
             return await ReadLineNoPeekAsync(cancellationToken).ConfigureAwait(false);
         }
 

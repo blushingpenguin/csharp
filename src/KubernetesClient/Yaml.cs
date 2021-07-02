@@ -3,6 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 using System.Text;
 using System.Threading.Tasks;
 using YamlDotNet.Core;
@@ -18,35 +19,111 @@ namespace k8s
     /// </summary>
     public static class Yaml
     {
+        private static readonly IDeserializer Deserializer =
+            new DeserializerBuilder()
+                .WithNamingConvention(CamelCaseNamingConvention.Instance)
+                .WithTypeConverter(new IntOrStringYamlConverter())
+                .WithTypeConverter(new ByteArrayStringYamlConverter())
+                .WithOverridesFromJsonPropertyAttributes()
+                .IgnoreUnmatchedProperties()
+                .Build();
+
+        private static readonly IValueSerializer Serializer =
+            new SerializerBuilder()
+                .DisableAliases()
+                .WithNamingConvention(CamelCaseNamingConvention.Instance)
+                .WithTypeConverter(new IntOrStringYamlConverter())
+                .WithTypeConverter(new ByteArrayStringYamlConverter())
+                .WithEventEmitter(e => new StringQuotingEmitter(e))
+                .ConfigureDefaultValuesHandling(DefaultValuesHandling.OmitNull)
+                .WithOverridesFromJsonPropertyAttributes()
+                .BuildValueSerializer();
+
+        private static readonly IDictionary<string, Type> ModelTypeMap = typeof(KubernetesEntityAttribute).Assembly
+            .GetTypes()
+            .Where(t => t.GetCustomAttributes(typeof(KubernetesEntityAttribute), true).Any())
+            .ToDictionary(
+                t =>
+                {
+                    var attr = (KubernetesEntityAttribute)t.GetCustomAttribute(
+                        typeof(KubernetesEntityAttribute), true);
+                    var groupPrefix = string.IsNullOrEmpty(attr.Group) ? "" : $"{attr.Group}/";
+                    return $"{groupPrefix}{attr.ApiVersion}/{attr.Kind}";
+                },
+                t => t);
+
+        public class ByteArrayStringYamlConverter : IYamlTypeConverter
+        {
+            public bool Accepts(Type type)
+            {
+                return type == typeof(byte[]);
+            }
+
+            public object ReadYaml(IParser parser, Type type)
+            {
+                if (parser?.Current is Scalar scalar)
+                {
+                    try
+                    {
+                        if (string.IsNullOrEmpty(scalar.Value))
+                        {
+                            return null;
+                        }
+
+                        return Encoding.UTF8.GetBytes(scalar.Value);
+                    }
+                    finally
+                    {
+                        parser.MoveNext();
+                    }
+                }
+
+                throw new InvalidOperationException(parser.Current?.ToString());
+            }
+
+            public void WriteYaml(IEmitter emitter, object value, Type type)
+            {
+                var obj = (byte[])value;
+                emitter?.Emit(new Scalar(Encoding.UTF8.GetString(obj)));
+            }
+        }
+
         /// <summary>
         /// Load a collection of objects from a stream asynchronously
+        ///
+        /// caller is responsible for closing the stream
         /// </summary>
         /// <param name="stream">
         /// The stream to load the objects from.
         /// </param>
         /// <param name="typeMap">
-        /// A map from <apiVersion>/<kind> to Type. For example "v1/Pod" -> typeof(V1Pod)
+        /// A map from apiVersion/kind to Type. For example "v1/Pod" -> typeof(V1Pod). If null, a default mapping will
+        /// be used.
         /// </param>
-        public static async Task<List<object>> LoadAllFromStreamAsync(Stream stream, Dictionary<String, Type> typeMap)
+        /// <returns>collection of objects</returns>
+        public static async Task<List<object>> LoadAllFromStreamAsync(Stream stream, IDictionary<string, Type> typeMap = null)
         {
             var reader = new StreamReader(stream);
             var content = await reader.ReadToEndAsync().ConfigureAwait(false);
             return LoadAllFromString(content, typeMap);
         }
 
+
         /// <summary>
         /// Load a collection of objects from a file asynchronously
         /// </summary>
-        /// <param name="fileName">
-        /// The name of the file to load from.
-        /// </param>
+        /// <param name="fileName">The name of the file to load from.</param>
         /// <param name="typeMap">
-        /// A map from <apiVersion>/<kind> to Type. For example "v1/Pod" -> typeof(V1Pod)
+        /// A map from apiVersion/kind to Type. For example "v1/Pod" -> typeof(V1Pod). If null, a default mapping will
+        /// be used.
         /// </param>
-        public static Task<List<object>> LoadAllFromFileAsync(String fileName, Dictionary<String, Type> typeMap)
+        /// <returns>collection of objects</returns>
+        public static async Task<List<object>> LoadAllFromFileAsync(string fileName, IDictionary<string, Type> typeMap = null)
         {
-            var reader = File.OpenRead(fileName);
-            return LoadAllFromStreamAsync(reader, typeMap);
+            using (var fileStream = File.OpenRead(fileName))
+            {
+                return await LoadAllFromStreamAsync(fileStream, typeMap).ConfigureAwait(false);
+            }
         }
 
         /// <summary>
@@ -56,40 +133,33 @@ namespace k8s
         /// The string to load the objects from.
         /// </param>
         /// <param name="typeMap">
-        /// A map from <apiVersion>/<kind> to Type. For example "v1/Pod" -> typeof(V1Pod)
+        /// A map from apiVersion/kind to Type. For example "v1/Pod" -> typeof(V1Pod). If null, a default mapping will
+        /// be used.
         /// </param>
-        public static List<object> LoadAllFromString(String content, Dictionary<String, Type> typeMap)
+        /// <returns>collection of objects</returns>
+        public static List<object> LoadAllFromString(string content, IDictionary<string, Type> typeMap = null)
         {
-            var deserializer =
-                new DeserializerBuilder()
-                    .WithNamingConvention(new CamelCaseNamingConvention())
-                    .WithTypeInspector(ti => new AutoRestTypeInspector(ti))
-                    .WithTypeConverter(new IntOrStringYamlConverter())
-                    .IgnoreUnmatchedProperties()
-                    .Build();
+            var mergedTypeMap = new Dictionary<string, Type>(ModelTypeMap);
+            // merge in KVPs from typeMap, overriding any in ModelTypeMap
+            typeMap?.ToList().ForEach(x => mergedTypeMap[x.Key] = x.Value);
+
             var types = new List<Type>();
             var parser = new Parser(new StringReader(content));
-            parser.Expect<StreamStart>();
-            while (parser.Accept<DocumentStart>())
+            parser.Consume<StreamStart>();
+            while (parser.Accept<DocumentStart>(out _))
             {
-                var obj = deserializer.Deserialize<KubernetesObject>(parser);
-                types.Add(typeMap[obj.ApiVersion + "/" + obj.Kind]);
+                var obj = Deserializer.Deserialize<KubernetesObject>(parser);
+                types.Add(mergedTypeMap[obj.ApiVersion + "/" + obj.Kind]);
             }
 
-            deserializer =
-                new DeserializerBuilder()
-                    .WithNamingConvention(new CamelCaseNamingConvention())
-                    .WithTypeInspector(ti => new AutoRestTypeInspector(ti))
-                    .WithTypeConverter(new IntOrStringYamlConverter())
-                    .Build();
             parser = new Parser(new StringReader(content));
-            parser.Expect<StreamStart>();
+            parser.Consume<StreamStart>();
             var ix = 0;
             var results = new List<object>();
-            while (parser.Accept<DocumentStart>())
+            while (parser.Accept<DocumentStart>(out _))
             {
                 var objType = types[ix++];
-                var obj = deserializer.Deserialize(parser, objType);
+                var obj = Deserializer.Deserialize(parser, objType);
                 results.Add(obj);
             }
 
@@ -105,7 +175,7 @@ namespace k8s
 
         public static async Task<T> LoadFromFileAsync<T>(string file)
         {
-            using (FileStream fs = File.OpenRead(file))
+            using (var fs = File.OpenRead(file))
             {
                 return await LoadFromStreamAsync<T>(fs).ConfigureAwait(false);
             }
@@ -113,13 +183,7 @@ namespace k8s
 
         public static T LoadFromString<T>(string content)
         {
-            var deserializer =
-                new DeserializerBuilder()
-                    .WithNamingConvention(new CamelCaseNamingConvention())
-                    .WithTypeInspector(ti => new AutoRestTypeInspector(ti))
-                    .WithTypeConverter(new IntOrStringYamlConverter())
-                    .Build();
-            var obj = deserializer.Deserialize<T>(content);
+            var obj = Deserializer.Deserialize<T>(content);
             return obj;
         }
 
@@ -129,116 +193,44 @@ namespace k8s
             var writer = new StringWriter(stringBuilder);
             var emitter = new Emitter(writer);
 
-            var serializer =
-                new SerializerBuilder()
-                    .DisableAliases()
-                    .WithNamingConvention(new CamelCaseNamingConvention())
-                    .WithTypeInspector(ti => new AutoRestTypeInspector(ti))
-                    .WithTypeConverter(new IntOrStringYamlConverter())
-                    .WithEventEmitter(e => new StringQuotingEmitter(e))
-                    .BuildValueSerializer();
             emitter.Emit(new StreamStart());
             emitter.Emit(new DocumentStart());
-            serializer.SerializeValue(emitter, value, typeof(T));
+            Serializer.SerializeValue(emitter, value, typeof(T));
 
             return stringBuilder.ToString();
         }
 
-        private class AutoRestTypeInspector : ITypeInspector
+        private static TBuilder WithOverridesFromJsonPropertyAttributes<TBuilder>(this TBuilder builder)
+            where TBuilder : BuilderSkeleton<TBuilder>
         {
-            private readonly ITypeInspector _inner;
+            // Use VersionInfo from the model namespace as that should be stable.
+            // If this is not generated in the future we will get an obvious compiler error.
+            var targetNamespace = typeof(VersionInfo).Namespace;
 
-            public AutoRestTypeInspector(ITypeInspector inner)
+            // Get all the concrete model types from the code generated namespace.
+            var types = typeof(KubernetesEntityAttribute).Assembly
+                .ExportedTypes
+                .Where(type => type.Namespace == targetNamespace &&
+                               !type.IsInterface &&
+                               !type.IsAbstract);
+
+            // Map any JsonPropertyAttribute instances to YamlMemberAttribute instances.
+            foreach (var type in types)
             {
-                _inner = inner;
+                foreach (var property in type.GetProperties())
+                {
+                    var jsonAttribute = property.GetCustomAttribute<JsonPropertyAttribute>();
+                    if (jsonAttribute == null)
+                    {
+                        continue;
+                    }
+
+                    var yamlAttribute = new YamlMemberAttribute { Alias = jsonAttribute.PropertyName };
+                    builder.WithAttributeOverride(type, property.Name, yamlAttribute);
+                }
             }
 
-            public IEnumerable<IPropertyDescriptor> GetProperties(Type type, object container)
-            {
-                var pds = _inner.GetProperties(type, container);
-                return pds.Select(pd => TrimPropertySuffix(pd, type)).ToList();
-            }
-
-            public IPropertyDescriptor GetProperty(Type type, object container, string name, bool ignoreUnmatched)
-            {
-                try
-                {
-                    return _inner.GetProperty(type, container, name, ignoreUnmatched);
-                }
-                catch (System.Runtime.Serialization.SerializationException)
-                {
-                    return _inner.GetProperty(type, container, name + "Property", ignoreUnmatched);
-                }
-            }
-
-            private IPropertyDescriptor TrimPropertySuffix(IPropertyDescriptor pd, Type type)
-            {
-                if (!pd.Name.EndsWith("Property"))
-                {
-                    return pd;
-                }
-
-                // This might have been renamed by AutoRest.  See if there is a
-                // JsonPropertyAttribute.PropertyName and use that instead if there is.
-                var jpa = pd.GetCustomAttribute<JsonPropertyAttribute>();
-                if (jpa == null || String.IsNullOrEmpty(jpa.PropertyName))
-                {
-                    return pd;
-                }
-
-                return new RenamedPropertyDescriptor(pd, jpa.PropertyName);
-            }
-
-            private class RenamedPropertyDescriptor : IPropertyDescriptor
-            {
-                private readonly IPropertyDescriptor _inner;
-                private readonly string _name;
-
-                public RenamedPropertyDescriptor(IPropertyDescriptor inner, string name)
-                {
-                    _inner = inner;
-                    _name = name;
-                }
-
-                public string Name => _name;
-
-                public bool CanWrite => _inner.CanWrite;
-
-                public Type Type => _inner.Type;
-
-                public Type TypeOverride
-                {
-                    get => _inner.TypeOverride;
-                    set => _inner.TypeOverride = value;
-                }
-
-                public int Order
-                {
-                    get => _inner.Order;
-                    set => _inner.Order = value;
-                }
-
-                public ScalarStyle ScalarStyle
-                {
-                    get => _inner.ScalarStyle;
-                    set => _inner.ScalarStyle = value;
-                }
-
-                public T GetCustomAttribute<T>() where T : Attribute
-                {
-                    return _inner.GetCustomAttribute<T>();
-                }
-
-                public IObjectDescriptor Read(object target)
-                {
-                    return _inner.Read(target);
-                }
-
-                public void Write(object target, object value)
-                {
-                    _inner.Write(target, value);
-                }
-            }
+            return builder;
         }
     }
 }

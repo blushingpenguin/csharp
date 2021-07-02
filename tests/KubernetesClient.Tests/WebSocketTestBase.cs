@@ -24,11 +24,12 @@ namespace k8s.Tests
         /// <summary>
         ///     The next server port to use.
         /// </summary>
-        static int NextPort = 13255;
-
+        private static int nextPort = 13255;
+        private bool disposedValue;
         private readonly ITestOutputHelper testOutput;
 
         /// <summary>
+        /// Initializes a new instance of the <see cref="WebSocketTestBase"/> class.
         ///     Create a new <see cref="WebSocketTestBase"/>.
         /// </summary>
         /// <param name="testOutput">
@@ -38,7 +39,7 @@ namespace k8s.Tests
         {
             this.testOutput = testOutput;
 
-            int port = Interlocked.Increment(ref NextPort);
+            int port = Interlocked.Increment(ref nextPort);
 
             // Useful to diagnose test timeouts.
             TestCancellation.Register(
@@ -81,7 +82,7 @@ namespace k8s.Tests
         protected CancellationTokenSource CancellationSource { get; } = new CancellationTokenSource();
 
         /// <summary>
-        ///     A <see cref="System.Threading.CancellationToken"/> that can be used to cancel asynchronous operations.
+        ///     A <see cref="CancellationToken"/> that can be used to cancel asynchronous operations.
         /// </summary>
         /// <seealso cref="CancellationSource"/>
         protected CancellationToken TestCancellation => CancellationSource.Token;
@@ -117,7 +118,7 @@ namespace k8s.Tests
             }
 
             logging.ClearProviders(); // Don't log to console.
-            logging.AddTestOutput(this.testOutput, LogLevel.Information);
+            logging.AddTestOutput(testOutput, LogLevel.Information);
         }
 
         /// <summary>
@@ -179,7 +180,8 @@ namespace k8s.Tests
                 {
                     if (received.IsFaulted)
                     {
-                        testOutput.WriteLine("Server socket operation to receive Close message failed: {0}",
+                        testOutput.WriteLine(
+                            "Server socket operation to receive Close message failed: {0}",
                             received.Exception.Flatten().InnerExceptions[0]);
                     }
                     else if (received.IsCanceled)
@@ -199,7 +201,7 @@ namespace k8s.Tests
                             await serverSocket.CloseAsync(
                                 received.Result.CloseStatus.Value,
                                 received.Result.CloseStatusDescription,
-                                TestCancellation);
+                                TestCancellation).ConfigureAwait(false);
 
                             testOutput.WriteLine("Server socket closed.");
                         }
@@ -259,8 +261,8 @@ namespace k8s.Tests
             Array.Copy(payload, 0, sendBuffer, 1, payload.Length);
 
             await webSocket.SendAsync(sendBuffer, WebSocketMessageType.Binary,
-                endOfMessage: true,
-                cancellationToken: TestCancellation);
+                true,
+                TestCancellation).ConfigureAwait(false);
 
             return sendBuffer.Length;
         }
@@ -289,7 +291,7 @@ namespace k8s.Tests
             using (MemoryStream buffer = new MemoryStream())
             {
                 byte[] receiveBuffer = new byte[1024];
-                WebSocketReceiveResult receiveResult = await webSocket.ReceiveAsync(receiveBuffer, TestCancellation);
+                WebSocketReceiveResult receiveResult = await webSocket.ReceiveAsync(receiveBuffer, TestCancellation).ConfigureAwait(false);
                 if (receiveResult.MessageType != WebSocketMessageType.Binary)
                 {
                     throw new IOException(
@@ -300,7 +302,7 @@ namespace k8s.Tests
 
                 while (!receiveResult.EndOfMessage)
                 {
-                    receiveResult = await webSocket.ReceiveAsync(receiveBuffer, TestCancellation);
+                    receiveResult = await webSocket.ReceiveAsync(receiveBuffer, TestCancellation).ConfigureAwait(false);
                     buffer.Write(receiveBuffer, 0, receiveResult.Count);
                 }
 
@@ -315,11 +317,7 @@ namespace k8s.Tests
                 totalBytes: receivedData.Length);
         }
 
-        public void Dispose()
-        {
-            this.CancellationSource.Dispose();
-            this.Host.Dispose();
-        }
+
 
         /// <summary>
         ///     A <see cref="ServiceClientCredentials"/> implementation representing no credentials (i.e. anonymous).
@@ -333,9 +331,10 @@ namespace k8s.Tests
             public static readonly AnonymousClientCredentials Instance = new AnonymousClientCredentials();
 
             /// <summary>
+            /// Initializes a new instance of the <see cref="AnonymousClientCredentials"/> class.
             ///     Create new <see cref="AnonymousClientCredentials"/>.
             /// </summary>
-            AnonymousClientCredentials()
+            private AnonymousClientCredentials()
             {
             }
         }
@@ -348,7 +347,35 @@ namespace k8s.Tests
             /// <summary>
             ///     An error occurred while closing the server-side socket.
             /// </summary>
-            static readonly EventId ErrorClosingServerSocket = new EventId(1000, nameof(ErrorClosingServerSocket));
+            private static readonly EventId ErrorClosingServerSocket = new EventId(1000, nameof(ErrorClosingServerSocket));
+        }
+
+        protected virtual void Dispose(bool disposing)
+        {
+            if (!disposedValue)
+            {
+                if (disposing)
+                {
+                    CancellationSource.Dispose();
+                    Host.Dispose();
+                }
+
+                disposedValue = true;
+            }
+        }
+
+        // // TODO: override finalizer only if 'Dispose(bool disposing)' has code to free unmanaged resources
+        // ~WebSocketTestBase()
+        // {
+        //     // Do not change this code. Put cleanup code in 'Dispose(bool disposing)' method
+        //     Dispose(disposing: false);
+        // }
+
+        public void Dispose()
+        {
+            // Do not change this code. Put cleanup code in 'Dispose(bool disposing)' method
+            Dispose(true);
+            GC.SuppressFinalize(this);
         }
     }
 }

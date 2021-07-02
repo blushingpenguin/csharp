@@ -1,54 +1,59 @@
 using System;
-using Microsoft.AspNetCore.JsonPatch;
 using Newtonsoft.Json;
 
 namespace k8s.Models
 {
-    internal class V1PathJsonConverter : JsonConverter
-    {
-        public override void WriteJson(JsonWriter writer, object value, JsonSerializer serializer)
-        {
-            serializer.Serialize(writer, (value as V1Patch)?.Content);
-        }
-
-        // no read patch object supported at the moment
-        public override object ReadJson(JsonReader reader, Type objectType, object existingValue,
-            JsonSerializer serializer)
-        {
-            throw new NotImplementedException();
-        }
-
-        public override bool CanConvert(Type objectType)
-        {
-            return objectType == typeof(V1Patch);
-        }
-    }
-
-    [JsonConverter(typeof(V1PathJsonConverter))]
+    [JsonConverter(typeof(V1PatchJsonConverter))]
     public partial class V1Patch
     {
-        public enum PathType
+        public enum PatchType
         {
+            /// <summary>
+            /// not set, this is not allowed
+            /// </summary>
+            Unknown,
+
+            /// <summary>
+            /// content type application/json-patch+json
+            /// </summary>
             JsonPatch,
+
+            /// <summary>
+            /// content type application/merge-patch+json
+            /// </summary>
             MergePatch,
+
+            /// <summary>
+            /// content type application/strategic-merge-patch+json
+            /// </summary>
             StrategicMergePatch,
+
+            /// <summary>
+            /// content type application/apply-patch+yaml
+            /// </summary>
+            ApplyPatch,
         }
 
-        public PathType Type { get; private set; }
+        public PatchType Type { get; private set; }
 
-        public V1Patch(IJsonPatchDocument jsonPatch) : this((object)jsonPatch)
+        public V1Patch(object body, PatchType type)
         {
+            Content = body;
+            Type = type;
+            CustomInit();
         }
 
         partial void CustomInit()
         {
-            if (Content is IJsonPatchDocument)
+            if (Content == null)
             {
-                Type = PathType.JsonPatch;
-                return;
+                throw new ArgumentNullException(nameof(Content), "object must be set");
             }
 
-            throw new NotSupportedException();
+            if (Type == PatchType.Unknown)
+            {
+                throw new ArgumentException("patch type must be set", nameof(Type));
+            }
         }
     }
 }

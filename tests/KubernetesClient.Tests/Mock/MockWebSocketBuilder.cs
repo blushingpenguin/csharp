@@ -1,4 +1,3 @@
-#if !NETCOREAPP2_1
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
@@ -42,5 +41,3 @@ namespace k8s.Tests.Mock
         }
     }
 }
-
-#endif // !NETCOREAPP2_1
